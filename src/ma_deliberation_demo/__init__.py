@@ -1,3 +1,3 @@
-from .orchestrator import run_deliberation
+"""MA Deliberation Demo - Multi-Agent Deliberation System for Community Governance."""
 
-__all__ = ["run_deliberation"]
+__version__ = "0.2.0"

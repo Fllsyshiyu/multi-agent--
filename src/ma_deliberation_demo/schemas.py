@@ -1,38 +1,70 @@
+"""Core data schemas for the multi-agent deliberation system."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Any
+import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+
+
+class TopicType(str, Enum):
+    PUBLIC_SPACE = "public_space"
+    INFRASTRUCTURE = "infrastructure"
+    ENVIRONMENT = "environment"
+    SOCIAL_SERVICE = "social_service"
+    TRANSPORTATION = "transportation"
+    HOUSING = "housing"
+
+
+class ConcernType(str, Enum):
+    ECONOMIC = "economic"
+    ENVIRONMENTAL = "environmental"
+    SOCIAL = "social"
+    HEALTH = "health"
+    SAFETY = "safety"
+    GOVERNANCE = "governance"
+    CULTURAL = "cultural"
+
+
+class Stance(str, Enum):
+    STRONG_SUPPORT = "strong_support"
+    SUPPORT = "support"
+    CONDITIONAL_SUPPORT = "conditional_support"
+    NEUTRAL = "neutral"
+    CONDITIONAL_OPPOSE = "conditional_oppose"
+    OPPOSE = "oppose"
+    STRONG_OPPOSE = "strong_oppose"
+
+
+class EvidenceSourceType(str, Enum):
+    GOV_POLICY = "gov_policy"
+    GOV_REPLY = "gov_reply"
+    COMPLAINT_12345 = "12345_complaint"
+    LEADER_BOARD = "leader_board"
+    NPC_PROPOSAL = "npc_proposal"
+    CPPCC_PROPOSAL = "cppcc_proposal"
+    NEWS = "news"
+    ACADEMIC = "academic"
+    COURT_CASE = "court_case"
 
 
 @dataclass
-class EvidenceCard:
-    evidence_id: str
-    topic: str
-    topic_type: str
-    source_type: str
-    source_title: str
-    source_url: str
-    date: str
-    actor_type: str
-    archetype: str
-    stance: str
-    concern_type: str
-    core_claim: str
-    evidence_quote: str
-    reliability_score: int
-    usable_agent: str
+class ConflictAxis:
+    name: str
+    parties: list[str]
+    intensity: str  # low, medium, high
+    description: str = ""
 
 
 @dataclass
 class TopicAnalysis:
-    topic: str
-    topic_type: str
-    difficulty: str
-    difficulty_score: int
-    conflict_dimensions: list[str]
-    potential_stakeholders: list[str]
-    required_archetypes: list[str]
-    suggested_agents: list[str]
+    topic_type: TopicType
+    conflict_axes: list[ConflictAxis] = field(default_factory=list)
+    silent_stakeholders: list[str] = field(default_factory=list)
+    power_asymmetry: str = ""
+    complexity_score: int = 0
+    complexity_breakdown: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -40,56 +72,89 @@ class AgentCard:
     agent_id: str
     agent_name: str
     archetype: str
-    topic: str
     relationship_to_topic: str
-    main_interests: list[str]
-    stance: float
-    possible_stance: str
-    concerns: list[str]
-    can_say: list[str]
-    cannot_say: list[str]
-    tool_permissions: list[str] = field(default_factory=lambda: ["request_evidence"])
+    main_interests: list[str] = field(default_factory=list)
+    possible_stance: str = ""
+    stance_score: float = 0.0
+    can_say: list[str] = field(default_factory=list)
+    cannot_say: list[str] = field(default_factory=list)
+    evidence_ids: list[str] = field(default_factory=list)
+    avatar_color: str = "#6366f1"
+    avatar_emoji: str = "?"
+
+
+@dataclass
+class EvidenceCard:
+    evidence_id: str
+    topic: str
+    source_type: EvidenceSourceType
+    source_title: str
+    source_url: str
+    date: str
+    actor_type: str
+    archetype: str
+    stance: str
+    concern_type: ConcernType
+    core_claim: str
+    evidence_quote: str
+    reliability_score: float
+    usable_agent: str
 
 
 @dataclass
 class Utterance:
-    turn_id: int
-    phase: str
-    round_id: int
-    speaker: str
+    utterance_id: str
     speaker_id: str
-    content: str
-    stance: float
+    speaker_name: str
+    turn: int
+    stance_score: float
+    reply_to: Optional[str] = None
     evidence_ids: list[str] = field(default_factory=list)
-    reply_to: str | None = None
+    content: str = ""
+    is_boundary_violation: bool = False
+    violation_reason: str = ""
+
+
+@dataclass
+class DeliberationState:
+    topic: str
+    question: str
+    turn: int = 0
+    max_turns: int = 20
+    agents: list[AgentCard] = field(default_factory=list)
+    history: list[Utterance] = field(default_factory=list)
+    speaker_stats: dict[str, int] = field(default_factory=dict)
+    stance_trajectory: dict[str, list[float]] = field(default_factory=dict)
+    finished: bool = False
 
 
 @dataclass
 class ObserverMetrics:
-    speaking_share: dict[str, float]
-    speaking_chars: dict[str, int]
-    grounding_rate: float
-    reply_edges: list[dict[str, Any]]
-    stance_history: list[dict[str, Any]]
-    consensus_history: list[dict[str, Any]]
-    fairness_gini: float
-    minority_agents: list[str]
+    fairness_gini: float = 0.0
+    grounding_rate: float = 0.0
+    consensus: float = 0.0
+    polarization: float = 0.0
+    minority_retention: float = 0.0
+    reply_graph: dict[str, list[str]] = field(default_factory=dict)
+    speaker_share: dict[str, float] = field(default_factory=dict)
+    stance_variance_trajectory: list[float] = field(default_factory=list)
+    anomaly_flags: list[str] = field(default_factory=list)
+    minority_opinions: list[dict] = field(default_factory=list)
+    unanswered_questions: list[str] = field(default_factory=list)
 
 
 @dataclass
-class DeliberationResult:
-    topic_analysis: TopicAnalysis
+class DeliberationReport:
+    topic: str
+    question: str
     agents: list[AgentCard]
-    transcript: list[Utterance]
+    total_turns: int
     metrics: ObserverMetrics
-    report_markdown: str
-
-
-def to_dict(obj: Any) -> Any:
-    if hasattr(obj, "__dataclass_fields__"):
-        return asdict(obj)
-    if isinstance(obj, list):
-        return [to_dict(item) for item in obj]
-    if isinstance(obj, dict):
-        return {key: to_dict(value) for key, value in obj.items()}
-    return obj
+    transcript: list[Utterance]
+    conflict_structure: list[dict]
+    consensus_points: list[str]
+    divergence_points: list[str]
+    minority_opinions: list[dict]
+    actionable_proposals: list[dict]
+    field_research_questions: list[str]
+    generated_at: str = ""
