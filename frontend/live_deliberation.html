@@ -271,6 +271,36 @@ body{
 .api-config select:focus,.api-config input:focus{outline:none;border-color:var(--accent)}
 .api-config .hint{font-size:9px;color:var(--text-muted);margin-top:2px}
 
+/* Mode Selection */
+.mode-tabs{display:flex;gap:0;margin-bottom:16px;border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border)}
+.mode-tab{flex:1;padding:10px 16px;background:var(--card-bg);color:var(--text-dim);cursor:pointer;font-size:12px;font-weight:600;transition:all 0.2s;text-align:center;border:none;font-family:var(--font)}
+.mode-tab:hover{color:var(--text);background:var(--border)}
+.mode-tab.active{background:var(--accent);color:#0f172a}
+.mode-tab .tab-icon{font-size:18px;display:block;margin-bottom:2px}
+.mode-tab .tab-sub{font-size:9px;font-weight:400;opacity:0.8}
+.quick-model-select{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.quick-model-select select{flex:1;min-width:140px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:var(--font)}
+.quick-model-select select:focus{outline:none;border-color:var(--accent)}
+.model-group-label{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:8px 0 4px;padding-left:2px}
+.expert-agent-list{max-height:300px;overflow-y:auto;padding-right:4px}
+.expert-agent-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--card-bg);border-radius:6px;margin-bottom:4px}
+.expert-agent-row .ea-emoji{font-size:16px;width:22px;text-align:center}
+.expert-agent-row .ea-name{font-size:11px;color:var(--text-dim);min-width:60px}
+.expert-agent-row select{flex:1;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-family:var(--font)}
+.expert-agent-row select:focus{outline:none;border-color:var(--accent)}
+.mode-info{font-size:10px;color:var(--text-muted);margin-top:8px;text-align:center;padding:6px;background:rgba(56,189,248,0.06);border-radius:6px}
+
+/* Reviewer area */
+.reviewer-area{display:flex;align-items:center;justify-content:center;gap:30px;margin-bottom:4px}
+.reviewer-area .char{transform:scale(0.8)}
+.reviewer-area .av{width:48px;height:48px;font-size:24px}
+.reviewer-area .av-wrap{width:48px;height:48px}
+.reviewer-area .cname{color:var(--success)}
+.reviewer-area .bubble{max-width:300px}
+.role-badge{font-size:8px;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:400}
+.role-badge.host{background:rgba(251,191,36,0.2);color:var(--warning)}
+.role-badge.reviewer{background:rgba(52,211,153,0.2);color:var(--success)}
+
 /* Print styles */
 @media print{
   body{background:#fff!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -330,7 +360,10 @@ body{
 
     <section class="center-stage">
       <div class="stage-label">🏛️ 议 事 厅 🏛️</div>
-      <div class="moderator-area" id="moderatorArea"></div>
+      <div class="reviewer-area" id="facilitatorArea">
+        <div id="moderatorSlot"></div>
+        <div id="reviewerSlot"></div>
+      </div>
       <div class="divider-line"></div>
       <div class="char-ring" id="characterRing"></div>
     </section>
@@ -369,7 +402,7 @@ body{
     </div>
 
     <!-- Turn count selector -->
-    <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:16px">
       <span style="font-size:12px;color:var(--text-dim)">发言总轮次:</span>
       <button class="preset" onclick="adjustTurns(-3)" style="font-size:16px;padding:4px 10px">−</button>
       <span id="turnCountDisplay" style="font-family:var(--font-mono);font-size:15px;color:var(--accent);min-width:30px;text-align:center">18</span>
@@ -378,8 +411,78 @@ body{
              oninput="syncTurnCount()" style="width:80px;accent-color:var(--accent)">
     </div>
 
+    <!-- ── Mode Selection: Quick vs Expert ── -->
+    <div class="mode-tabs" id="modeTabs">
+      <button class="mode-tab active" onclick="switchMode('quick')" id="modeTabQuick">
+        <span class="tab-icon">⚡</span>快速模式
+        <span class="tab-sub">统一基座模型</span>
+      </button>
+      <button class="mode-tab" onclick="switchMode('expert')" id="modeTabExpert">
+        <span class="tab-icon">🔬</span>专家模式
+        <span class="tab-sub">分别指定模型</span>
+      </button>
+    </div>
+
+    <!-- Quick Mode: single model for all agents -->
+    <div id="quickModeConfig">
+      <div class="model-group-label">🤖 统一基座模型</div>
+      <div class="quick-model-select">
+        <select id="quickModelSelect" onchange="onQuickModelChange()">
+          <optgroup label="── DeepSeek ──">
+            <option value="deepseek-chat">DeepSeek V3 (deepseek-chat)</option>
+            <option value="deepseek-reasoner">DeepSeek R1 (deepseek-reasoner)</option>
+          </optgroup>
+          <optgroup label="── OpenAI ──">
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
+            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+            <option value="o1-preview">o1 Preview</option>
+          </optgroup>
+          <optgroup label="── Anthropic Claude ──">
+            <option value="claude-opus-4-7">Claude Opus 4.7</option>
+            <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6</option>
+            <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+          </optgroup>
+          <optgroup label="── Google ──">
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+          </optgroup>
+          <optgroup label="── 阿里通义千问 ──">
+            <option value="qwen-max">Qwen Max (通义千问)</option>
+            <option value="qwen-plus">Qwen Plus</option>
+            <option value="qwen-turbo">Qwen Turbo</option>
+          </optgroup>
+          <optgroup label="── 智谱 GLM ──">
+            <option value="glm-4-plus">GLM-4 Plus</option>
+            <option value="glm-4-flash">GLM-4 Flash</option>
+          </optgroup>
+          <optgroup label="── 月之暗面 Moonshot ──">
+            <option value="moonshot-v1-8k">Moonshot v1 (8K)</option>
+            <option value="moonshot-v1-32k">Moonshot v1 (32K)</option>
+          </optgroup>
+          <optgroup label="── 百川 ──">
+            <option value="baichuan4">Baichuan 4</option>
+            <option value="baichuan3-turbo">Baichuan 3 Turbo</option>
+          </optgroup>
+          <optgroup label="── MiniMax ──">
+            <option value="abab6.5s-chat">MiniMax abab6.5s</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="mode-info">💡 快速模式：所有 Agent 统一使用上述基座模型生成发言</div>
+    </div>
+
+    <!-- Expert Mode: per-agent model selection -->
+    <div id="expertModeConfig" style="display:none">
+      <div class="model-group-label">🔬 为每个角色分别指定基座模型</div>
+      <div class="expert-agent-list" id="expertAgentList">
+        <!-- Populated by JS -->
+      </div>
+      <div class="mode-info">💡 专家模式：不同角色可采用不同模型，如利益方用低成本模型、主持人/评审员用高性能模型</div>
+    </div>
+
     <!-- API Mode Toggle -->
-    <label class="api-toggle" id="apiToggle">
+    <label class="api-toggle" id="apiToggle" style="margin-top:8px">
       <input type="checkbox" id="apiModeCheck">
       <span class="switch"></span>
       <span>🔌 接入后端 API（LLM 驱动）</span>
@@ -409,8 +512,8 @@ body{
       ▶ 进入议事厅
     </button>
     <p style="font-size:10px;color:var(--text-muted);margin-top:12px" id="modeHint">
-      当前为<strong>嵌入式规则引擎</strong>模式 — 无需服务器和 API Key<br>
-      <span style="color:var(--accent2)">开启「接入后端 API」可使用真实 LLM 驱动多智能体</span>
+      当前为<strong>快速模式</strong> · 嵌入式规则引擎 — 无需服务器和 API Key<br>
+      <span style="color:var(--accent2)">开启「接入后端 API」可使用真实 LLM 按所选模型驱动多智能体</span>
     </p>
   </div>
 </div>
@@ -634,19 +737,58 @@ const ARCHETYPE_CONFIGS = {
     label: '主持人',
     speakingTraits: {
       tone: '中立、有节奏感，确保议事有序推进',
-      strategy: '平衡发言权，引导沉默方发声，控制发言节奏',
+      strategy: '平衡发言权，引导沉默方发声，控制发言节奏，cue各阶段流程',
       negotiationStyle: '不做价值判断，只做程序性引导',
     },
     interventionTemplates: [
       '感谢{over_speaker}的发言，我们已经充分了解了{over_group}的立场。现在我想请{under_speaker}分享一下{under_group}的看法——我们已经有一段时间没听到你们的声音了。',
       '{over_speaker}的观点很清晰了，谢谢。为了确保各方都有充分的表达机会，我想把时间交给{under_speaker}。{under_group}对这个问题的感受是什么？',
       '我注意到{over_speaker}已经多次发言，让我们先暂停一下。{under_speaker}，作为{under_group}的代表，您对刚才的讨论有什么回应吗？',
+      '目前发言分布有些不均衡——{over_group}已经充分表达了{over_count}次，而{under_group}只发言了{under_count}次。让我们听听{under_speaker}的看法。',
+      '现在我们进入下一个议题环节。各方已经就{current_topic}做了充分讨论，接下来我想请各位聚焦到{next_topic}上。',
+    ],
+    processTemplates: [
+      '好的，各位请注意。我们目前已经进行了{elapsed}轮讨论，接下来我们进入{phase_name}阶段。在这一阶段，{phase_instruction}。',
+      '在进入下一阶段之前，我先做一个小结：目前我们已经讨论了{covered_points}。还有{remaining_points}尚未涉及，接下来的讨论希望能聚焦到这些方面。',
     ],
     summaryTemplates: [
       '感谢各方今天的参与。现在我们进入议事总结环节。\n\n首先回顾今天的讨论过程：我们围绕"{topic}"展开了{total_turns}轮讨论，{agent_count}个利益相关方都充分表达了各自的立场和诉求。\n\n在讨论中，各方展示了愿意通过对话寻找共识的诚意：{consensus_brief}\n\n同时，我们也看到了一些持续存在的分歧：{divergence_brief}\n\n接下来，请街道办治理人员对议事结果做具体总结。',
     ],
     finalWrapTemplate: '谢谢{summarizer}的总结。今天的议事到此结束。\n\n作为主持人，我想补充几点观察：\n\n第一，今天的讨论展现了社区治理的复杂性——{topic}不是简单的二元选择，而是一个需要多方协商、条件设计的公共决策过程。\n\n第二，各方在"试点方案"框架上的共识是一个重要进展，这说明规则化的协商可以产生建设性的结果。\n\n第三，AI议事系统只是一个辅助工具——最终决策需要基于实地调研数据和真实的公众参与。\n\n议事报告已生成，包含所有发言记录、共识点、分歧点和待调研问题，供决策参考。感谢各位。',
     bottomLines: ['确保各方发言权平等', '引导讨论聚焦方案而非立场', '最终决策权归于真实的治理程序'],
+  },
+  '评审员': {
+    label: '评审员',
+    speakingTraits: {
+      tone: '冷静、客观、犀利，以专业眼光审视议事质量',
+      strategy: '定期审视议事过程，指出逻辑漏洞、证据缺失、群体偏见和讨论盲区',
+      negotiationStyle: '不做利益裁决，只做过程评审和质量诊断',
+    },
+    reviewTemplates: [
+      '【评审观察 第{round}轮】我注意到目前议事存在以下问题：\n\n1. 发言均衡性：{balance_comment}\n\n2. 论证质量：{argument_comment}\n\n3. 证据使用：{evidence_comment}\n\n建议主持人{recommendation}。',
+      '【议事过程评审】在已进行的{total_rounds}轮讨论中，我有以下几点观察：\n\n✓ 做得好的方面：{good_points}\n\n⚠ 需要改进的方面：{weak_points}\n\n💡 改进建议：{improvement_suggestions}',
+      '【利益群体讨论质量评估】\n\n{agent_assessments}\n\n总体来看，{overall_assessment}。建议下一阶段{next_stage_suggestion}。',
+    ],
+    agentAssessTemplates: [
+      '• {agent_name}（{agent_archetype}）：发言{count}次，立场表达{clarity}。{specific_feedback}',
+    ],
+    closingReviewTemplate: '【评审员最终评议】\n\n经过{total_rounds}轮议事，我对本次议事过程做如下评审：\n\n一、过程质量评估\n- 发言公平性：{fairness_review}\n- 论证深度：{depth_review}\n- 证据基础：{grounding_review}\n- 协商建设性：{constructive_review}\n\n二、各群体参与度\n{participation_summary}\n\n三、议事成果评价\n{outcome_assessment}\n\n四、存在的不足与改进建议\n{improvement_plan}\n\n本评审旨在提升议事质量，不替代任何一方立场。',
+    bottomLines: ['评审结论必须有具体依据', '不替代任何一方的利益表达', '指出的问题必须有改进建议'],
+    balancedComments: [
+      '各方发言机会较为均等，议事过程公平有序',
+      '整体均衡，但{over_group}的发言时间略多于其他群体',
+      '存在明显不均衡——{over_group}占据了约{over_pct}%的发言，而{under_group}几乎没有机会充分表达',
+    ],
+    argumentComments: [
+      '多数发言基于具体事实和诉求，论证较为扎实',
+      '部分发言停留在立场重申而非方案构建，建议各方更多聚焦"如何做"而非"是否做"',
+      '出现了{fallacy_type}的逻辑倾向，建议回到具体数据和条件讨论',
+    ],
+    evidenceComments: [
+      '证据引用较为充分，多数论点有数据支撑',
+      '证据使用有待加强——{low_evidence_agents}的发言缺乏数据支撑',
+      '部分证据存在选择性引用的问题，建议各方更全面地看待数据',
+    ],
   },
 };
 
@@ -780,7 +922,8 @@ function createAgentsForTopic(topicAnalysis) {
       interests: [
         `确保各方发言权平等`,
         `引导讨论聚焦方案设计而非立场对抗`,
-        `保障议事过程有序、建设性`
+        `cue流程阶段、控制发言节奏`,
+        `观察发言分布，调整发言机会`
       ],
       cannotSay: ['我支持某一方', '某一方的观点是错的', '你们应该接受某个方案'],
       topicContext: {
@@ -788,9 +931,50 @@ function createAgentsForTopic(topicAnalysis) {
         over_group: '',
         under_speaker: '',
         under_group: '',
+        over_count: '',
+        under_count: '',
+        current_topic: '',
+        next_topic: '',
+        elapsed: '',
+        phase_name: '',
+        phase_instruction: '',
+        covered_points: '',
+        remaining_points: '',
         consensus_brief: '',
         divergence_brief: '',
         summarizer: '',
+      }
+    },
+    // Reviewer — evaluates deliberation quality, not a stakeholder
+    {
+      id:'rev', name:'议事评审员', archetype:'评审员',
+      emoji:'🔍', color:'#34d399', bg:'#d1fae5',
+      stance: 0,
+      interests: [
+        `评审议事过程是否公平、论证是否充分`,
+        `指出逻辑漏洞、证据缺失和讨论盲区`,
+        `评估各利益群体的讨论质量和参与度`,
+        `为议事质量改进提供具体建议`
+      ],
+      cannotSay: ['我支持某一方', '某一方的结论是正确的', '我替代利益方表达诉求'],
+      topicContext: {
+        balance_comment: '',
+        argument_comment: '',
+        evidence_comment: '',
+        recommendation: '',
+        good_points: '',
+        weak_points: '',
+        improvement_suggestions: '',
+        agent_assessments: '',
+        overall_assessment: '',
+        next_stage_suggestion: '',
+        fairness_review: '',
+        depth_review: '',
+        grounding_review: '',
+        constructive_review: '',
+        participation_summary: '',
+        outcome_assessment: '',
+        improvement_plan: '',
       }
     },
   ];
@@ -1162,15 +1346,229 @@ function selectNextSpeaker(agents, history, speakerCounts, lastSpeakerId) {
   return sorted[0];
 }
 
+// ── Reviewer response composer ──────────────────────────────────────
+function composeReview(agents, history, speakerCounts, turnNumber, totalTurns, topicAnalysis) {
+  const cfg = ARCHETYPE_CONFIGS['评审员'];
+  if (!cfg) return null;
+
+  // --- Build balance comment ---
+  const totalSpeeches = Object.values(speakerCounts).reduce((s, c) => s + c, 0) || 1;
+  const maxCount = Math.max(...Object.values(speakerCounts));
+  const minCount = Math.min(...Object.values(speakerCounts));
+  const overAgent = agents.find(a => (speakerCounts[a.id] || 0) === maxCount);
+  const underAgent = agents.find(a => (speakerCounts[a.id] || 0) === minCount);
+
+  let balanceComment;
+  if (maxCount - minCount <= 2) {
+    balanceComment = cfg.balancedComments[0];
+  } else if (maxCount - minCount <= 4) {
+    balanceComment = fillTemplate(cfg.balancedComments[1], {
+      over_group: overAgent?.name || '某群体',
+    });
+  } else {
+    const overPct = Math.round((maxCount / totalSpeeches) * 100);
+    balanceComment = fillTemplate(cfg.balancedComments[2], {
+      over_group: overAgent?.name || '某群体',
+      over_pct: String(overPct),
+      under_group: underAgent?.name || '另一群体',
+    });
+  }
+
+  // --- Build argument comment ---
+  let argumentComment;
+  if (turnNumber < 8) {
+    argumentComment = cfg.argumentComments[0];
+  } else if (R.next() > 0.6) {
+    argumentComment = cfg.argumentComments[1];
+  } else {
+    argumentComment = fillTemplate(cfg.argumentComments[2], {
+      fallacy_type: R.pick(['立场固化', '二元对立', '选择性举证', '过度泛化']),
+    });
+  }
+
+  // --- Build evidence comment ---
+  const lowEvidenceAgents = agents
+    .filter(a => {
+      const agentUtts = history.filter(h => h.speaker_id === a.id);
+      const grounded = agentUtts.filter(h => h.evidence_ids && h.evidence_ids.length > 0).length;
+      return agentUtts.length > 1 && grounded / agentUtts.length < 0.3;
+    })
+    .map(a => a.name);
+
+  let evidenceComment;
+  if (lowEvidenceAgents.length === 0) {
+    evidenceComment = cfg.evidenceComments[0];
+  } else {
+    evidenceComment = fillTemplate(cfg.evidenceComments[1], {
+      low_evidence_agents: lowEvidenceAgents.join('、'),
+    });
+  }
+
+  // --- Build recommendation ---
+  let recommendation;
+  if (maxCount - minCount > 4) {
+    recommendation = `优先邀请${underAgent?.name || '发言较少的群体'}多发表意见，并适当限制${overAgent?.name || '发言较多的群体'}的发言次数`;
+  } else if (lowEvidenceAgents.length > 1) {
+    recommendation = `引导各方在发言中更多引用具体数据或证据卡，提升论证的实证基础`;
+  } else {
+    recommendation = `继续维持当前的议事节奏，引导各方从立场表达转向具体的方案条件设计`;
+  }
+
+  // --- Build agent assessments ---
+  const agentAssessments = agents.map(a => {
+    const count = speakerCounts[a.id] || 0;
+    const utts = history.filter(h => h.speaker_id === a.id);
+    const grounded = utts.filter(h => h.evidence_ids && h.evidence_ids.length > 0).length;
+    const clarity = count >= 3 ? '清晰充分' : count >= 1 ? '基本明确' : '尚不充分';
+    const specificFeedback = count === 0
+      ? `尚未获得发言机会，建议主持人在后续轮次中予以关注`
+      : grounded === 0
+        ? `发言未引用证据，建议增强数据支撑`
+        : `发言有据，论证较为扎实`;
+
+    return `• ${a.emoji} ${a.name}（${a.archetype}）：发言${count}次，立场表达${clarity}。${specificFeedback}`;
+  }).join('\n');
+
+  // --- Compose the review ---
+  let content;
+  if (turnNumber > totalTurns * 0.7) {
+    // Late-stage review
+    const tmpl = R.pick(cfg.reviewTemplates);
+    content = fillTemplate(tmpl, {
+      round: String(turnNumber),
+      balance_comment: balanceComment,
+      argument_comment: argumentComment,
+      evidence_comment: evidenceComment,
+      recommendation: recommendation,
+      total_rounds: String(turnNumber),
+      good_points: '各方已从初始立场表达转向具体方案条件的协商',
+      weak_points: `部分群体（如${underAgent?.name || '发言较少方'}）的诉求尚未得到充分讨论`,
+      improvement_suggestions: `建议在剩余轮次中优先安排${underAgent?.name || '未充分发言的群体'}发言，并引导各方聚焦到具体可量化的方案条件上`,
+      agent_assessments: agentAssessments,
+      overall_assessment: '议事总体推进有序，但发言均衡性和论证深度仍有提升空间',
+      next_stage_suggestion: '聚焦具体方案参数的量化讨论',
+    });
+  } else {
+    const tmpl = R.pick(cfg.reviewTemplates);
+    content = fillTemplate(tmpl, {
+      round: String(turnNumber),
+      balance_comment: balanceComment,
+      argument_comment: argumentComment,
+      evidence_comment: evidenceComment,
+      recommendation: recommendation,
+      total_rounds: String(turnNumber),
+      good_points: '各方积极参与，基本立场和核心诉求已明确表达',
+      weak_points: `存在${maxCount - minCount > 3 ? '发言分布不均' : '部分论证缺乏数据支撑'}的问题`,
+      improvement_suggestions: `建议${maxCount - minCount > 3 ? '平衡发言机会' : '加强证据引用'}`,
+      agent_assessments: agentAssessments,
+      overall_assessment: '议事处于良性推进状态，各方均展现出协商意愿',
+      next_stage_suggestion: '继续深化方案条件的具体讨论',
+    });
+  }
+
+  return {
+    speaker_name: '议事评审员',
+    speaker_id: 'rev',
+    stance_score: 0,
+    reply_to: null,
+    evidence_ids: [],
+    content: content,
+    speaker_emoji: '🔍',
+    speaker_color: '#34d399',
+    turn: history.length + 1,
+  };
+}
+
+function composeFinalReview(agents, history, speakerCounts, topicAnalysis) {
+  const cfg = ARCHETYPE_CONFIGS['评审员'];
+  if (!cfg) return null;
+
+  const totalSpeeches = Object.values(speakerCounts).reduce((s, c) => s + c, 0) || 1;
+  const maxCount = Math.max(...Object.values(speakerCounts));
+  const minCount = Math.min(...Object.values(speakerCounts));
+  const gini = computeGiniFromCounts(agents, speakerCounts);
+
+  // Fairness
+  const fairnessReview = gini < 0.2
+    ? `发言分布较为公平（Gini=${gini.toFixed(3)}），各方均获得了基本的表达机会`
+    : gini < 0.35
+      ? `发言分布基本合理（Gini=${gini.toFixed(3)}），但仍有改善空间`
+      : `发言分布不够均衡（Gini=${gini.toFixed(3)}），部分群体表达机会不足`;
+
+  // Depth
+  const groundedCount = history.filter(h => h.evidence_ids && h.evidence_ids.length > 0).length;
+  const gRate = groundedCount / (history.length || 1);
+  const depthReview = gRate > 0.4
+    ? `论证整体具有较好的证据基础（证据引用率${(gRate*100).toFixed(0)}%），多数论点有数据支撑`
+    : gRate > 0.2
+      ? `证据基础一般（证据引用率${(gRate*100).toFixed(0)}%），部分论点缺乏数据支撑`
+      : `证据基础较弱（证据引用率${(gRate*100).toFixed(0)}%），建议在后续议事中加强数据引用`;
+
+  // Constructiveness
+  const constructiveReview = `各方从初始立场对立逐步走向方案协商，展现了较好的协商意愿。但具体的量化指标和资金分摊方案仍需进一步细化。`;
+
+  // Participation summary
+  const participationSummary = agents.map(a => {
+    const count = speakerCounts[a.id] || 0;
+    const pct = Math.round((count / totalSpeeches) * 100);
+    const bar = '█'.repeat(Math.max(1, Math.round(pct / 5))) + '░'.repeat(Math.max(0, 20 - Math.round(pct / 5)));
+    return `  ${a.emoji} ${a.name}：${count}次（${pct}%）${bar}`;
+  }).join('\n');
+
+  // Outcome
+  const outcomeAssessment = `本次议事在"试点方案替代一刀切"的框架上达成了基本共识，各方对方案的核心要素（摊位边界、闭市时间、卫生标准、退出机制）有了初步一致。但部分量化参数和资金安排仍是开放性议题，需要实地调研补充。议事成果可作为后续政策制定的重要参考。`;
+
+  // Improvement
+  const improvementPlan = `1. 建议建立发言轮次预警机制，当某方发言超过均值2倍时自动提醒主持人介入；
+2. 建议引入"强制证据"规则——各方在提出主张时至少引用1条证据卡；
+3. 建议增加"反向立场陈述"环节——要求每方设身处地为对方立场做一次辩护，以增强相互理解；
+4. AI议事结果不替代真实公众参与，最终决策需基于实地调研数据。`;
+
+  const tmpl = cfg.closingReviewTemplate;
+  const content = fillTemplate(tmpl, {
+    total_rounds: String(history.length),
+    fairness_review: fairnessReview,
+    depth_review: depthReview,
+    grounding_review: `证据引用率约${(gRate*100).toFixed(0)}%`,
+    constructive_review: constructiveReview,
+    participation_summary: participationSummary,
+    outcome_assessment: outcomeAssessment,
+    improvement_plan: improvementPlan,
+  });
+
+  return {
+    speaker_name: '议事评审员',
+    speaker_id: 'rev',
+    stance_score: 0,
+    reply_to: null,
+    evidence_ids: [],
+    content: content,
+    speaker_emoji: '🔍',
+    speaker_color: '#34d399',
+    turn: history.length + 1,
+  };
+}
+
+function computeGiniFromCounts(agents, speakerCounts) {
+  const vals = agents.map(a => speakerCounts[a.id] || 0).sort((a, b) => a - b);
+  const n = vals.length;
+  if (n === 0) return 0;
+  const sum = vals.reduce((a, b) => a + b, 0);
+  if (sum === 0) return 0;
+  let idxSum = 0;
+  vals.forEach((v, i) => { idxSum += (i + 1) * v; });
+  return Math.max(0, (2 * idxSum) / (n * sum) - (n + 1) / n);
+}
+
 // ── Main deliberation engine ────────────────────────────────────────
 function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
   const history = [];
   const speakerCounts = {};
   const stanceTrajectory = {};
 
-  // Find moderator (separate from stakeholders)
   const moderator = stakeholders.find(a => a.id === 'mod');
-  const agents = stakeholders.filter(a => a.id !== 'mod');
+  const reviewer = stakeholders.find(a => a.id === 'rev');
+  const agents = stakeholders.filter(a => a.id !== 'mod' && a.id !== 'rev');
 
   agents.forEach(a => {
     speakerCounts[a.id] = 0;
@@ -1181,22 +1579,74 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
     speakerCounts[moderator.id] = 0;
     moderator._evidence = [];
   }
+  if (reviewer) {
+    speakerCounts[reviewer.id] = 0;
+    reviewer._evidence = [];
+  }
 
-  const discussionTurns = maxTurns - 4; // Reserve 4 turns for: mod summary call + gov summary + silent bottom-line + mod wrap
+  // Reserve turns for: review x2 + mod guidance x2 + mod summary call + gov summary + silent bottom-line + reviewer final + mod wrap
+  const reservedTurns = 9;
+  const discussionTurns = maxTurns - reservedTurns;
+  const firstReviewAt = Math.floor(discussionTurns * 0.45);
+  const secondReviewAt = Math.floor(discussionTurns * 0.78);
 
-  // Phase 1 & 2: Opening + Discussion (with moderator intervention)
+  // Phase 1 & 2: Opening + Discussion (with moderator intervention & reviewer check-ins)
   for (let turn = 0; turn < discussionTurns; turn++) {
     let speaker = selectNextSpeaker(agents, history, speakerCounts, null);
 
+    // Reviewer mid-term check-in at scheduled points
+    if (reviewer && (turn === firstReviewAt || turn === secondReviewAt)) {
+      const reviewUtt = composeReview(agents, history, speakerCounts, history.length, discussionTurns, topicAnalysis);
+      if (reviewUtt) {
+        reviewUtt.turn = history.length + 1;
+        history.push(reviewUtt);
+        speakerCounts[reviewer.id] = (speakerCounts[reviewer.id] || 0) + 1;
+        const metrics = computeLiveMetrics(agents, history, stanceTrajectory, speakerCounts);
+        yield { utterance: reviewUtt, speaker: reviewer, metrics, progress: { current: history.length, total: maxTurns } };
+      }
+    }
+
+    // Moderator phase guidance at key transition points
+    if (moderator && (turn === Math.floor(discussionTurns * 0.3) || turn === Math.floor(discussionTurns * 0.6))) {
+      const procCfg = ARCHETYPE_CONFIGS['主持人'];
+      if (procCfg.processTemplates && procCfg.processTemplates.length > 0) {
+        const phaseName = turn < discussionTurns * 0.5 ? '方案条件设计' : '具体参数协商';
+        const phaseInstruction = turn < discussionTurns * 0.5
+          ? '请各方从"支持或反对"的立场表达，转向"在什么条件下可以/不可以"的方案设计'
+          : '请各方就具体参数（时间、费用、标准）进行协商，提出可量化的建议';
+
+        const coveredPoints = ['各方基本立场和核心诉求', '试点方案的框架共识'].join('、');
+        const remainingPoints = ['量化指标的具体数值', '资金分摊方案', '长期机制设计'].join('、');
+
+        const procContent = fillTemplate(R.pick(procCfg.processTemplates), {
+          elapsed: String(history.length),
+          phase_name: phaseName,
+          phase_instruction: phaseInstruction,
+          covered_points: coveredPoints,
+          remaining_points: remainingPoints,
+        });
+
+        const procUtt = {
+          speaker_name: moderator.name, speaker_id: moderator.id,
+          stance_score: 0, reply_to: null, evidence_ids: [],
+          content: procContent,
+          speaker_emoji: moderator.emoji, speaker_color: moderator.color,
+          turn: history.length + 1,
+        };
+        history.push(procUtt);
+        speakerCounts[moderator.id] = (speakerCounts[moderator.id] || 0) + 1;
+        const metrics = computeLiveMetrics(agents, history, stanceTrajectory, speakerCounts);
+        yield { utterance: procUtt, speaker: moderator, metrics, progress: { current: history.length, total: maxTurns } };
+      }
+    }
+
     // Moderator intervention: if speaker has spoken >= 3 times and we're past opening
     if (moderator && speakerCounts[speaker.id] >= 3 && history.length >= 6) {
-      // Find an under-represented agent to redirect to
       const underAgent = agents
         .filter(a => a.id !== speaker.id)
         .sort((a, b) => (speakerCounts[a.id] || 0) - (speakerCounts[b.id] || 0))[0];
 
       if (underAgent && (speakerCounts[underAgent.id] || 0) < speakerCounts[speaker.id] - 1) {
-        // Generate moderator intervention
         const cfg = ARCHETYPE_CONFIGS['主持人'];
         const tmpl = R.pick(cfg.interventionTemplates);
         const interventionContent = fillTemplate(tmpl, {
@@ -1204,6 +1654,8 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
           over_group: speaker.archetype,
           under_speaker: underAgent.name,
           under_group: underAgent.archetype,
+          over_count: String(speakerCounts[speaker.id] || 0),
+          under_count: String(speakerCounts[underAgent.id] || 0),
         });
 
         const modUtt = {
@@ -1223,7 +1675,6 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
         const metrics = computeLiveMetrics(agents, history, stanceTrajectory, speakerCounts);
         yield { utterance: modUtt, speaker: moderator, metrics, progress: { current: history.length, total: maxTurns } };
 
-        // Redirect to the under-represented agent
         speaker = underAgent;
       }
     }
@@ -1238,13 +1689,11 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
     yield { utterance: utt, speaker, metrics, progress: { current: history.length, total: maxTurns } };
   }
 
-  // Phase 3: Closing summary (4 turns with moderator)
+  // Phase 3: Closing summary
   const e = topicAnalysis.entities || {};
   const govAgent = agents.find(a => a.archetype === '治理方') || agents[3];
   const silentAgent = agents.find(a => a.archetype === '间接影响者') || agents[4];
-  const profAgent = agents.find(a => a.archetype === '专业观察者') || agents[5];
 
-  // Build discussion summary for moderator
   const consensusPoints = [
     `以有时间框架的试点方案替代一刀切决策`,
     `${e.subject||'摊位'}编号与边界线划定、${e.issue2||'卫生'}押金和环卫附加费机制`,
@@ -1258,7 +1707,6 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
   ];
 
   if (moderator) {
-    // Turn N-3: Moderator calls for summary
     const cfg = ARCHETYPE_CONFIGS['主持人'];
     const summaryCallContent = fillTemplate(R.pick(cfg.summaryTemplates), {
       topic: topicAnalysis.key ? `「${topicAnalysis.key}」` : topicAnalysis.type,
@@ -1281,7 +1729,7 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
     yield { utterance: modCallUtt, speaker: moderator, metrics, progress: { current: history.length, total: maxTurns } };
   }
 
-  // Turn N-2: Governance agent delivers detailed summary
+  // Governance agent delivers detailed summary
   const govSummaryContent = `感谢主持人和各方今天真诚且富有建设性的讨论。作为${govAgent.name}，我现在做最终总结。
 
 一、核心共识：
@@ -1321,7 +1769,7 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
   let metrics2 = computeLiveMetrics(agents, history, stanceTrajectory, speakerCounts);
   yield { utterance: govUtt, speaker: govAgent, metrics: metrics2, progress: { current: history.length, total: maxTurns } };
 
-  // Turn N-1: Silent stakeholder final bottom line
+  // Silent stakeholder final bottom line
   const silentContent = `我同意${govAgent.name}的总结。最后再强调一次：${R.pick(ARCHETYPE_CONFIGS['间接影响者']?.bottomLines||['我的核心诉求必须得到保障'])}。这不是在刁难任何一方，而是${silentAgent.topicContext?.justification||'方案的可执行性取决于配套资源是否到位'}。如果最终方案不提${e.issue2||'环卫'}资金分摊的具体安排，我保留反对意见。但我愿意在明确经费保障的前提下参与下一步试点工作。`;
 
   const silentUtt = {
@@ -1339,7 +1787,19 @@ function* runDeliberation(stakeholders, topicAnalysis, maxTurns) {
   let metrics3 = computeLiveMetrics(agents, history, stanceTrajectory, speakerCounts);
   yield { utterance: silentUtt, speaker: silentAgent, metrics: metrics3, progress: { current: history.length, total: maxTurns } };
 
-  // Turn N: Moderator final wrap
+  // Reviewer final assessment
+  if (reviewer) {
+    const finalReviewUtt = composeFinalReview(agents, history, speakerCounts, topicAnalysis);
+    if (finalReviewUtt) {
+      finalReviewUtt.turn = history.length + 1;
+      history.push(finalReviewUtt);
+      speakerCounts[reviewer.id] = (speakerCounts[reviewer.id] || 0) + 1;
+      let metricsR = computeLiveMetrics(agents, history, stanceTrajectory, speakerCounts);
+      yield { utterance: finalReviewUtt, speaker: reviewer, metrics: metricsR, progress: { current: history.length, total: maxTurns } };
+    }
+  }
+
+  // Moderator final wrap
   if (moderator) {
     const cfg = ARCHETYPE_CONFIGS['主持人'];
     const wrapContent = fillTemplate(cfg.finalWrapTemplate, {
@@ -1424,18 +1884,21 @@ let UI = {
 
 function renderCharacters() {
   const ring = document.getElementById('characterRing');
-  const modArea = document.getElementById('moderatorArea');
+  const modSlot = document.getElementById('moderatorSlot');
+  const revSlot = document.getElementById('reviewerSlot');
   ring.innerHTML = '';
-  modArea.innerHTML = '';
+  if (modSlot) modSlot.innerHTML = '';
+  if (revSlot) revSlot.innerHTML = '';
   UI.agentEls = {};
   UI.bubbles = {};
 
-  // Separate moderator from stakeholders
+  // Separate facilitator roles from stakeholders
   const moderator = UI.agents.find(a => a.id === 'mod');
-  const stakeholders = UI.agents.filter(a => a.id !== 'mod');
+  const reviewer = UI.agents.find(a => a.id === 'rev');
+  const stakeholders = UI.agents.filter(a => a.id !== 'mod' && a.id !== 'rev');
 
-  // Render moderator in dedicated area
-  if (moderator) {
+  // Render moderator in its slot
+  if (moderator && modSlot) {
     const div = document.createElement('div');
     div.className = 'char dimmed';
     div.id = `char-${moderator.id}`;
@@ -1445,15 +1908,15 @@ function renderCharacters() {
         <div class="av" style="background:${moderator.bg};color:${moderator.color}">${moderator.emoji}</div>
         <div class="think-dots">...</div>
       </div>
-      <div class="cname">${moderator.name}</div>
-      <div class="crole">🎤 中立主持</div>
+      <div class="cname">${moderator.name}<span class="role-badge host">主持</span></div>
+      <div class="crole">🎤 流程引导 · 发言调度</div>
       <div class="bubble top" id="bub-${moderator.id}" style="max-width:320px">
         <div class="bmeta"><span id="bn-${moderator.id}"></span><span id="bt-${moderator.id}"></span></div>
         <div id="bc-${moderator.id}"></div>
         <div class="evbadges" id="be-${moderator.id}"></div>
       </div>
     `;
-    modArea.appendChild(div);
+    modSlot.appendChild(div);
     UI.agentEls[moderator.id] = div;
     UI.bubbles[moderator.id] = {
       el: div.querySelector('.bubble'),
@@ -1461,6 +1924,36 @@ function renderCharacters() {
       turn: div.querySelector(`#bt-${moderator.id}`),
       content: div.querySelector(`#bc-${moderator.id}`),
       ev: div.querySelector(`#be-${moderator.id}`),
+    };
+  }
+
+  // Render reviewer in its slot
+  if (reviewer && revSlot) {
+    const div = document.createElement('div');
+    div.className = 'char dimmed';
+    div.id = `char-${reviewer.id}`;
+    div.innerHTML = `
+      <div class="av-wrap">
+        <div class="av-glow" style="--g:${reviewer.color}80"></div>
+        <div class="av" style="background:${reviewer.bg};color:${reviewer.color}">${reviewer.emoji}</div>
+        <div class="think-dots">...</div>
+      </div>
+      <div class="cname">${reviewer.name}<span class="role-badge reviewer">评审</span></div>
+      <div class="crole">🔍 过程评审 · 质量诊断</div>
+      <div class="bubble top" id="bub-${reviewer.id}" style="max-width:320px">
+        <div class="bmeta"><span id="bn-${reviewer.id}"></span><span id="bt-${reviewer.id}"></span></div>
+        <div id="bc-${reviewer.id}"></div>
+        <div class="evbadges" id="be-${reviewer.id}"></div>
+      </div>
+    `;
+    revSlot.appendChild(div);
+    UI.agentEls[reviewer.id] = div;
+    UI.bubbles[reviewer.id] = {
+      el: div.querySelector('.bubble'),
+      name: div.querySelector(`#bn-${reviewer.id}`),
+      turn: div.querySelector(`#bt-${reviewer.id}`),
+      content: div.querySelector(`#bc-${reviewer.id}`),
+      ev: div.querySelector(`#be-${reviewer.id}`),
     };
   }
 
@@ -1498,7 +1991,7 @@ function renderCharacters() {
 
 function renderSpeakerBars() {
   document.getElementById('speakerBars').innerHTML = UI.agents
-    .filter(a => a.id !== 'mod')
+    .filter(a => a.id !== 'mod' && a.id !== 'rev')
     .map(a => `
     <div class="sr">
       <span class="sn">${a.name.slice(0, 5)}</span>
@@ -1543,7 +2036,7 @@ function updateMetrics(metrics) {
   document.getElementById('mPol').textContent = metrics.polarization.toFixed(3);
   document.getElementById('mPolBar').style.width = (metrics.polarization * 100) + '%';
 
-  UI.agents.filter(a => a.id !== 'mod').forEach(a => {
+  UI.agents.filter(a => a.id !== 'mod' && a.id !== 'rev').forEach(a => {
     const bar = document.getElementById(`sb-${a.id}`);
     const pct = document.getElementById(`sp-${a.id}`);
     const v = (metrics.shares[a.name] || 0) * 100;
@@ -1601,7 +2094,7 @@ function resetUI() {
 }
 
 function updateSpeakerBarChartAll(v) {
-  UI.agents.filter(a => a.id !== 'mod').forEach(a => {
+  UI.agents.filter(a => a.id !== 'mod' && a.id !== 'rev').forEach(a => {
     const bar = document.getElementById(`sb-${a.id}`);
     const pct = document.getElementById(`sp-${a.id}`);
     if (bar) bar.style.width = v + '%';
@@ -1619,13 +2112,15 @@ function initApp() {
 
   UI.topicAnalysis = analyzeTopic(topic);
   UI.agents = createAgentsForTopic(UI.topicAnalysis);
+  buildExpertAgentList(topic); // Refresh expert config with current topic's agents
   UI.history = [];
   UI.running = false;
   UI.cancelled = false;
   UI.useApi = document.getElementById('apiModeCheck').checked;
   UI.maxTurns = parseInt(document.getElementById('turnSlider').value) || 18;
 
-  // Save API config to localStorage
+  // Save configs
+  saveModeConfig();
   if (UI.useApi) {
     const cfg = {
       provider: document.getElementById('apiProvider').value,
@@ -2031,6 +2526,174 @@ async function startAPIDeliberation() {
 }
 
 // ====================================================================
+// MODE SELECTION (Quick / Expert)
+// ====================================================================
+let currentMode = 'quick'; // 'quick' | 'expert'
+
+const QUICK_MODEL_OPTIONS = [
+  { v:'deepseek-chat', t:'DeepSeek V3', g:'DeepSeek' },
+  { v:'deepseek-reasoner', t:'DeepSeek R1', g:'DeepSeek' },
+  { v:'gpt-4o', t:'GPT-4o', g:'OpenAI' },
+  { v:'gpt-4o-mini', t:'GPT-4o Mini', g:'OpenAI' },
+  { v:'gpt-4-turbo', t:'GPT-4 Turbo', g:'OpenAI' },
+  { v:'o1-preview', t:'o1 Preview', g:'OpenAI' },
+  { v:'claude-opus-4-7', t:'Claude Opus 4.7', g:'Anthropic' },
+  { v:'claude-sonnet-4-6', t:'Claude Sonnet 4.6', g:'Anthropic' },
+  { v:'claude-haiku-4-5', t:'Claude Haiku 4.5', g:'Anthropic' },
+  { v:'gemini-2.5-pro', t:'Gemini 2.5 Pro', g:'Google' },
+  { v:'gemini-2.5-flash', t:'Gemini 2.5 Flash', g:'Google' },
+  { v:'qwen-max', t:'Qwen Max', g:'阿里通义' },
+  { v:'qwen-plus', t:'Qwen Plus', g:'阿里通义' },
+  { v:'qwen-turbo', t:'Qwen Turbo', g:'阿里通义' },
+  { v:'glm-4-plus', t:'GLM-4 Plus', g:'智谱' },
+  { v:'glm-4-flash', t:'GLM-4 Flash', g:'智谱' },
+  { v:'moonshot-v1-8k', t:'Moonshot v1 8K', g:'月之暗面' },
+  { v:'moonshot-v1-32k', t:'Moonshot v1 32K', g:'月之暗面' },
+  { v:'baichuan4', t:'Baichuan 4', g:'百川' },
+  { v:'baichuan3-turbo', t:'Baichuan 3 Turbo', g:'百川' },
+  { v:'abab6.5s-chat', t:'MiniMax abab6.5s', g:'MiniMax' },
+];
+
+// Default expert model assignments
+const DEFAULT_EXPERT_MODELS = {
+  'a0': 'deepseek-chat',      // 摊贩代表
+  'a1': 'deepseek-chat',      // 居民代表
+  'a2': 'deepseek-chat',      // 消费者代表
+  'a3': 'qwen-plus',          // 街道办治理人员
+  'a4': 'deepseek-chat',      // 环卫人员代表
+  'a5': 'claude-sonnet-4-6',  // 城市设计师
+  'mod': 'claude-sonnet-4-6', // 主持人
+  'rev': 'claude-opus-4-7',   // 评审员
+};
+
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('modeTabQuick').classList.toggle('active', mode === 'quick');
+  document.getElementById('modeTabExpert').classList.toggle('active', mode === 'expert');
+  document.getElementById('quickModeConfig').style.display = mode === 'quick' ? 'block' : 'none';
+  document.getElementById('expertModeConfig').style.display = mode === 'expert' ? 'block' : 'none';
+
+  const hint = document.getElementById('modeHint');
+  const apiOn = document.getElementById('apiModeCheck').checked;
+  if (mode === 'quick') {
+    hint.innerHTML = '当前为<strong>快速模式</strong> · ' + (apiOn ? '后端 API 驱动' : '嵌入式规则引擎') + '<br><span style="color:var(--accent2)">所有 Agent 统一使用同一个基座模型</span>';
+  } else {
+    hint.innerHTML = '当前为<strong>专家模式</strong> · ' + (apiOn ? '后端 API 驱动' : '嵌入式规则引擎') + '<br><span style="color:var(--accent2)">不同 Agent 可使用不同的基座模型</span>';
+  }
+}
+
+function buildExpertAgentList(topic) {
+  // Build the expert agent list based on the current topic
+  const topicText = topic || document.getElementById('topicInput').value.trim() || '小区门口夜市是否应该保留？';
+  const topicAnalysis = analyzeTopic(topicText);
+  const agents = createAgentsForTopic(topicAnalysis);
+  const container = document.getElementById('expertAgentList');
+  if (!container) return;
+
+  const groups = {};
+  QUICK_MODEL_OPTIONS.forEach(o => {
+    if (!groups[o.g]) groups[o.g] = [];
+    groups[o.g].push(o);
+  });
+
+  let html = '';
+  agents.forEach(a => {
+    const defaultModel = DEFAULT_EXPERT_MODELS[a.id] || 'deepseek-chat';
+    html += '<div class="expert-agent-row">';
+    html += `<span class="ea-emoji">${a.emoji}</span>`;
+    html += `<span class="ea-name">${a.name}</span>`;
+    html += '<select id="expertModel_' + a.id + '" onchange="onExpertModelChange()">';
+    for (const [group, models] of Object.entries(groups)) {
+      html += '<optgroup label="── ' + group + ' ──">';
+      models.forEach(m => {
+        const sel = m.v === defaultModel ? ' selected' : '';
+        html += '<option value="' + m.v + '"' + sel + '>' + m.t + '</option>';
+      });
+      html += '</optgroup>';
+    }
+    html += '</select></div>';
+  });
+  container.innerHTML = html;
+}
+
+function getSelectedModel(agentId) {
+  if (currentMode === 'quick') {
+    return document.getElementById('quickModelSelect').value;
+  } else {
+    const sel = document.getElementById('expertModel_' + agentId);
+    return sel ? sel.value : 'claude-sonnet-4-6';
+  }
+}
+
+function getAllAgentModels() {
+  const models = {};
+  // This is called after agents are created, so we use the current UI.agents
+  if (UI.agents && UI.agents.length > 0) {
+    UI.agents.forEach(a => {
+      models[a.id] = getSelectedModel(a.id);
+    });
+  } else {
+    // Fallback: return default
+    const topicAnalysis = analyzeTopic('小区门口夜市是否应该保留？');
+    const agents = createAgentsForTopic(topicAnalysis);
+    agents.forEach(a => {
+      models[a.id] = getSelectedModel(a.id);
+    });
+  }
+  return models;
+}
+
+function onQuickModelChange() {
+  // Could update a preview, but for now just track
+}
+
+function onExpertModelChange() {
+  // Track individual model changes
+}
+
+function saveModeConfig() {
+  const cfg = {
+    mode: currentMode,
+    quickModel: document.getElementById('quickModelSelect').value,
+    expertModels: {},
+  };
+  if (currentMode === 'expert') {
+    const topicAnalysis = analyzeTopic('小区门口夜市是否应该保留？');
+    const agents = createAgentsForTopic(topicAnalysis);
+    agents.forEach(a => {
+      const sel = document.getElementById('expertModel_' + a.id);
+      if (sel) cfg.expertModels[a.id] = sel.value;
+    });
+  }
+  localStorage.setItem('ma_deliberation_mode_cfg', JSON.stringify(cfg));
+}
+
+function loadModeConfig() {
+  const saved = localStorage.getItem('ma_deliberation_mode_cfg');
+  if (saved) {
+    try {
+      const cfg = JSON.parse(saved);
+      if (cfg.mode) {
+        switchMode(cfg.mode);
+        if (cfg.mode === 'quick' && cfg.quickModel) {
+          const sel = document.getElementById('quickModelSelect');
+          if (sel) sel.value = cfg.quickModel;
+        }
+        if (cfg.mode === 'expert' && cfg.expertModels) {
+          // Will be applied after expert list is built
+          setTimeout(() => {
+            for (const [id, model] of Object.entries(cfg.expertModels)) {
+              const sel = document.getElementById('expertModel_' + id);
+              if (sel) sel.value = model;
+            }
+          }, 100);
+        }
+      }
+    } catch(e) {}
+  }
+}
+
+// ====================================================================
 // TURN COUNT SELECTOR
 // ====================================================================
 function adjustTurns(delta) {
@@ -2059,13 +2722,14 @@ document.getElementById('reportModal').addEventListener('click', e => {
 document.getElementById('apiModeCheck').addEventListener('change', function() {
   const cfg = document.getElementById('apiConfig');
   const hint = document.getElementById('modeHint');
+  const modeLabel = currentMode === 'quick' ? '快速模式' : '专家模式';
   if (this.checked) {
     cfg.classList.add('show');
-    hint.innerHTML = '当前为<strong style="color:var(--accent)">后端 API 驱动</strong>模式 — 需先启动后端<br><span style="color:var(--accent2)">每个 Agent 将调用真实 LLM 生成发言</span>';
+    hint.innerHTML = '当前为<strong>' + modeLabel + '</strong> · <strong style="color:var(--accent)">后端 API 驱动</strong> — 需先启动后端<br><span style="color:var(--accent2)">每个 Agent 将调用真实 LLM 按所选模型生成发言</span>';
     document.querySelector('.mode-badge').textContent = 'API';
   } else {
     cfg.classList.remove('show');
-    hint.innerHTML = '当前为<strong>嵌入式规则引擎</strong>模式 — 无需服务器和 API Key<br><span style="color:var(--accent2)">开启「接入后端 API」可使用真实 LLM 驱动多智能体</span>';
+    hint.innerHTML = '当前为<strong>' + modeLabel + '</strong> · <strong>嵌入式规则引擎</strong> — 无需服务器和 API Key<br><span style="color:var(--accent2)">开启「接入后端 API」可使用真实 LLM 驱动多智能体</span>';
     document.querySelector('.mode-badge').textContent = 'LIVE 生成';
   }
 });
@@ -2098,6 +2762,8 @@ document.getElementById('topicInput').addEventListener('keydown', e => {
 });
 
 // Initial render
+buildExpertAgentList();
+loadModeConfig();
 UI.agents = createAgentsForTopic(analyzeTopic('小区门口夜市是否应该保留？'));
 renderCharacters();
 renderSpeakerBars();

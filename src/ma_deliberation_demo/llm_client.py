@@ -25,6 +25,36 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 
+# ── Provider to API key env var mapping ─────────────────────────────────────
+
+PROVIDER_API_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai_compat": "OPENAI_API_KEY",  # fallback
+    "deepseek": "DEEPSEEK_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
+    "zhipu": "ZHIPU_API_KEY",
+    "moonshot": "MOONSHOT_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
+
+def resolve_api_key(provider: str, api_key: str = "", model: str = "") -> str:
+    """Resolve API key: explicit > provider-specific env > generic env."""
+    if api_key:
+        return api_key
+
+    # Try provider-specific env var
+    env_var = PROVIDER_API_KEY_ENV.get(provider, "")
+    if env_var:
+        val = os.environ.get(env_var, "")
+        if val:
+            return val
+
+    # Fallback: try LLM_API_KEY
+    return os.environ.get("LLM_API_KEY", "")
+
+
 # ── Provider-agnostic message types ──────────────────────────────────────────
 
 def build_messages(
@@ -79,7 +109,7 @@ class OpenAIClient(LLMClient):
         temperature: float = 0.7,
     ):
         self.model = model
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self.api_key = resolve_api_key("openai", api_key, model)
         self.base_url = base_url or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -108,7 +138,14 @@ class OpenAIClient(LLMClient):
             kwargs["response_format"] = {"type": "json_object"}
 
         response = client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content or ""
+        msg = response.choices[0].message
+        content = msg.content or ""
+        # DeepSeek V4 reasoning models may return content in reasoning_content
+        if not content:
+            reasoning = getattr(msg, "reasoning_content", "") or ""
+            if reasoning:
+                content = reasoning
+        return content
 
     def __repr__(self):
         return f"OpenAIClient(model={self.model}, base_url={self.base_url})"
@@ -127,7 +164,7 @@ class AnthropicClient(LLMClient):
         temperature: float = 0.7,
     ):
         self.model = model
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        self.api_key = resolve_api_key("anthropic", api_key, model)
         self.max_tokens = max_tokens
         self.temperature = temperature
 
@@ -395,16 +432,18 @@ def create_llm_client(
     """
     provider = provider or os.environ.get("LLM_PROVIDER", "simulation")
     model = model or os.environ.get("LLM_MODEL", "")
-    api_key = api_key or os.environ.get("LLM_API_KEY", "")
     base_url = base_url or os.environ.get("LLM_BASE_URL", "")
     max_tokens = int(os.environ.get("LLM_MAX_TOKENS", str(max_tokens)))
     temperature = float(os.environ.get("LLM_TEMPERATURE", str(temperature)))
+
+    # Resolve API key: explicit arg > provider-specific env > LLM_API_KEY
+    api_key = resolve_api_key(provider, api_key, model)
 
     if provider == "openai":
         return OpenAIClient(
             model=model or "gpt-4o",
             api_key=api_key,
-            base_url=base_url,
+            base_url=base_url or "https://api.openai.com/v1",
             max_tokens=max_tokens,
             temperature=temperature,
         )
@@ -418,7 +457,7 @@ def create_llm_client(
         )
 
     elif provider == "openai_compat":
-        # For Qwen, DeepSeek, Zhipu, Moonshot, etc.
+        # For Qwen, DeepSeek, Zhipu, Moonshot, Gemini, etc.
         return OpenAIClient(
             model=model or "qwen-plus",
             api_key=api_key,
@@ -435,6 +474,86 @@ def create_llm_client(
             f"Unknown LLM provider: {provider}. "
             f"Supported: openai, anthropic, openai_compat, simulation"
         )
+
+
+# ── Key Validation ────────────────────────────────────────────────────────────
+
+def validate_api_key(provider: str, model: str, api_key: str, base_url: str = "") -> dict:
+    """Test an API key with a minimal call. Returns {valid: bool, error: str, provider: str, model: str}.
+
+    Makes a tiny chat completion request (max 10 tokens) and checks the response.
+    """
+    result = {"valid": False, "error": "", "provider": provider, "model": model}
+
+    if not api_key or not api_key.strip():
+        result["error"] = "API Key 为空"
+        return result
+
+    if provider == "simulation":
+        result["valid"] = True
+        return result
+
+    print(f"[VALIDATE] Testing {provider}/{model} via {base_url}...", flush=True)
+
+    try:
+        if provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "say ok"}],
+            )
+            text = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text += block.text
+            if text.strip():
+                result["valid"] = True
+                print(f"[VALIDATE] OK: {text[:30]}...", flush=True)
+            else:
+                result["error"] = "返回空响应"
+                print(f"[VALIDATE] FAILED: empty response", flush=True)
+        else:
+            # OpenAI and OpenAI-compatible providers
+            from openai import OpenAI
+            url = base_url or "https://api.openai.com/v1"
+            client = OpenAI(api_key=api_key, base_url=url)
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=50,
+                messages=[{"role": "user", "content": "say ok"}],
+            )
+            msg = response.choices[0].message
+            content = (msg.content or "").strip()
+            # DeepSeek V4 thinking mode may put response in reasoning_content
+            reasoning = getattr(msg, "reasoning_content", "") or ""
+            if content:
+                result["valid"] = True
+                print(f"[VALIDATE] OK: {content[:40]}...", flush=True)
+            elif reasoning:
+                result["valid"] = True
+                print(f"[VALIDATE] OK (reasoning): {reasoning[:40]}...", flush=True)
+            else:
+                result["error"] = f"返回空响应 (finish_reason={response.choices[0].finish_reason})"
+                print(f"[VALIDATE] FAILED: empty response, finish_reason={response.choices[0].finish_reason}", flush=True)
+    except Exception as e:
+        err_str = str(e)
+        print(f"[VALIDATE] FAILED: {err_str[:120]}", flush=True)
+        # Extract the most useful part of the error
+        if "401" in err_str or "403" in err_str or "Unauthorized" in err_str:
+            result["error"] = "API Key 无效 (认证失败)"
+        elif "429" in err_str or "rate" in err_str.lower():
+            result["error"] = "API 频率限制，稍后重试"
+        elif "insufficient" in err_str.lower() or "balance" in err_str.lower():
+            result["error"] = "API 余额不足"
+        elif "connect" in err_str.lower() or "timeout" in err_str.lower() or "refused" in err_str.lower():
+            result["error"] = "无法连接到 API 服务器"
+        else:
+            # Truncate long errors
+            result["error"] = err_str[:150] if len(err_str) > 150 else err_str
+
+    return result
 
 
 # ── Convenience ───────────────────────────────────────────────────────────────

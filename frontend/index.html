@@ -3,329 +3,599 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多智能体议事厅 | Multi-Agent Deliberation</title>
+<title>多智能体议事厅 | SOP + Fishbowl</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0f172a;--panel-bg:#1e293b;--card-bg:#334155;
-  --text:#e2e8f0;--text-dim:#94a3b8;--text-muted:#64748b;
-  --accent:#38bdf8;--accent2:#818cf8;--success:#34d399;
-  --warning:#fbbf24;--danger:#f87171;
-  --border:#475569;--radius:12px;--radius-sm:8px;
-  --shadow:0 4px 24px rgba(0,0,0,0.4);
-  --font:'Segoe UI',system-ui,-apple-system,sans-serif;
-  --font-mono:'Cascadia Code','Fira Code','JetBrains Mono',monospace;
+  --bg:#0b1121;--panel:#141d2e;--card:#1a2740;--text:#e0e6f0;
+  --dim:#8899b4;--muted:#556680;--accent:#38bdf8;--accent2:#a78bfa;
+  --ok:#34d399;--warn:#f59e0b;--err:#f87171;
+  --border:#253450;--radius:10px;--radius-sm:6px;
+  --font:system-ui,-apple-system,sans-serif;
+  --support:#34d399;--cond-support:#60a5fa;--neutral:#94a3b8;
+  --cond-oppose:#f59e0b;--oppose:#f87171;
 }
-body{
-  font-family:var(--font);background:var(--bg);color:var(--text);
-  min-height:100vh;overflow:hidden;
-  background-image:
-    radial-gradient(ellipse at 20% 50%,rgba(56,189,248,0.06) 0%,transparent 60%),
-    radial-gradient(ellipse at 80% 20%,rgba(129,140,248,0.06) 0%,transparent 60%);
-}
-.app{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;overflow:hidden}
+.app{display:grid;grid-template-rows:auto 1fr;height:100vh}
 
 /* Top Bar */
 .topbar{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:10px 24px;background:var(--panel-bg);border-bottom:1px solid var(--border);z-index:10;
+  display:flex;align-items:center;gap:16px;padding:8px 20px;
+  background:var(--panel);border-bottom:1px solid var(--border);z-index:20;
 }
-.topbar .logo{display:flex;align-items:center;gap:10px}
-.topbar .logo .icon{font-size:26px}
-.topbar .logo h1{font-size:17px;font-weight:700}
-.topbar .logo h1 span{color:var(--accent)}
+.topbar .logo{font-size:16px;font-weight:700;white-space:nowrap}
+.topbar .logo span{color:var(--accent)}
 .topic-tag{
-  background:var(--card-bg);padding:6px 16px;border-radius:20px;
-  font-size:13px;border:1px solid var(--border);max-width:450px;
+  background:var(--card);padding:5px 14px;border-radius:16px;
+  font-size:12px;border:1px solid var(--border);max-width:380px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.status-badge{font-size:12px;padding:4px 12px;border-radius:12px}
-.status-badge.idle{color:var(--text-muted);background:var(--card-bg)}
+.sop-bar{
+  display:flex;align-items:center;gap:1px;flex:0 0 auto;
+  overflow-x:auto;overflow-y:hidden;max-width:320px;
+  scrollbar-width:none;
+}
+.sop-bar::-webkit-scrollbar{display:none}
+.sop-step{
+  display:flex;align-items:center;gap:3px;font-size:9px;color:var(--muted);
+  padding:2px 4px;border-radius:8px;transition:all 0.4s;white-space:nowrap;
+  flex-shrink:0;
+}
+.sop-step .dot{width:6px;height:6px;border-radius:50%;background:var(--border);transition:all 0.4s}
+.sop-step.active{color:var(--accent)}
+.sop-step.active .dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.sop-step.done{color:var(--ok)}
+.sop-step.done .dot{background:var(--ok)}
+.sop-conn{width:8px;height:1px;background:var(--border);flex-shrink:0}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:10px;white-space:nowrap}
+.status-badge.idle{color:var(--muted);background:var(--card)}
 .status-badge.running{color:var(--accent);background:rgba(56,189,248,0.1);animation:pulse 1.5s infinite}
-.status-badge.done{color:var(--success);background:rgba(52,211,153,0.1)}
+.status-badge.done{color:var(--ok);background:rgba(52,211,153,0.1)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes spin{100%{transform:rotate(360deg)}}
 
-/* Main */
-.main{display:grid;grid-template-columns:240px 1fr 300px;overflow:hidden}
+/* Main Layout — 3 columns */
+.main{display:grid;grid-template-columns:220px 260px 1fr;overflow:hidden}
 
-/* Left Panel */
+/* Left Panel — Stakeholder Avatars */
 .left-panel{
-  background:var(--panel-bg);border-right:1px solid var(--border);
-  padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;
+  background:var(--panel);border-right:1px solid var(--border);
+  padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;
 }
-.mcard{
-  background:var(--card-bg);border-radius:var(--radius-sm);padding:12px;
+.agent-mini{
+  background:var(--card);border-radius:var(--radius);padding:10px 12px;
+  border-left:4px solid var(--border);transition:all 0.3s;cursor:default;
+  display:flex;flex-direction:column;gap:4px;
 }
-.mcard .ml{font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
-.mcard .mv{font-size:24px;font-weight:700;font-family:var(--font-mono)}
-.mcard .ms{font-size:10px;color:var(--text-muted);margin-top:2px}
-.mbar{height:3px;background:var(--border);border-radius:2px;margin-top:6px;overflow:hidden}
-.mbar .fill{height:100%;border-radius:2px;transition:width 0.5s}
+.agent-mini.speaking{border-left-color:var(--accent);background:#1e3050;box-shadow:0 0 12px rgba(56,189,248,0.15)}
+.agent-mini.inner{border-left-color:var(--ok);background:#152820}
+.agent-mini.outer{opacity:0.45;filter:grayscale(30%)}
+.agent-mini .am-hd{display:flex;align-items:center;gap:8px}
+.agent-mini .am-emoji{
+  font-size:24px;width:36px;height:36px;display:flex;align-items:center;
+  justify-content:center;background:rgba(255,255,255,0.05);border-radius:50%;
+}
+.agent-mini .am-name{font-size:12px;font-weight:600}
+.agent-mini .am-role{font-size:9px;color:var(--dim)}
+.agent-mini .am-stats{display:flex;gap:10px;font-size:10px;color:var(--muted)}
+.agent-mini .am-stance{
+  font-size:10px;padding:2px 8px;border-radius:10px;display:inline-block;font-weight:600;
+}
+.stance-support{background:rgba(52,211,153,0.2);color:var(--support)}
+.stance-conditional_support{background:rgba(96,165,250,0.2);color:var(--cond-support)}
+.stance-neutral{background:rgba(148,163,184,0.2);color:var(--neutral)}
+.stance-conditional_oppose{background:rgba(245,158,11,0.2);color:var(--cond-oppose)}
+.stance-oppose{background:rgba(248,113,113,0.2);color:var(--oppose)}
 
-.sbars{margin-top:6px}
-.sr{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px}
-.sr .sn{width:70px;text-align:right;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sr .st{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
-.sr .sf{height:100%;border-radius:3px;transition:width 0.5s}
+/* Center — Fishbowl Discussion Frame */
+.center-fishbowl{
+  background:var(--panel);border-left:1px solid var(--border);border-right:1px solid var(--border);
+  padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:16px;overflow-y:auto;
+}
+.fishbowl-frame{
+  width:100%;background:var(--card);border:3px solid var(--border);border-radius:var(--radius);
+  padding:16px 12px;position:relative;text-align:center;
+}
+.fishbowl-frame.active{border-color:var(--accent);box-shadow:0 0 20px rgba(56,189,248,0.12)}
+.fishbowl-frame .fb-label{
+  position:absolute;top:-11px;left:50%;transform:translateX(-50%);
+  background:var(--accent);color:#0b1121;font-size:10px;font-weight:700;
+  padding:2px 14px;border-radius:8px;white-space:nowrap;
+}
+.fishbowl-frame .fb-round{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px}
+.fishbowl-frame .fb-round span{color:var(--accent)}
+.fishbowl-inner-avatars{
+  display:flex;flex-wrap:wrap;gap:16px;justify-content:center;padding:8px 0;
+}
+.fb-avatar{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  animation:popIn 0.5s ease;
+}
+@keyframes popIn{0%{transform:scale(0);opacity:0}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
+.fb-avatar .fba-emoji{
+  font-size:36px;width:60px;height:60px;display:flex;align-items:center;
+  justify-content:center;border-radius:50%;transition:all 0.3s;
+}
+.fb-avatar .fba-name{font-size:11px;font-weight:600;color:var(--text)}
+.fb-avatar .fba-role{font-size:9px;color:var(--dim)}
+.fb-avatar .fba-stance{
+  font-size:9px;padding:1px 8px;border-radius:8px;
+}
+.fishbowl-outer-section{
+  width:100%;margin-top:4px;padding:8px 10px;background:rgba(255,255,255,0.02);
+  border-radius:var(--radius-sm);text-align:center;
+}
+.fishbowl-outer-section .fbo-label{font-size:9px;color:var(--muted);margin-bottom:6px;letter-spacing:1px}
+.fishbowl-outer-avatars{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.fb-avatar.outer-avatar .fba-emoji{font-size:24px;width:44px;height:44px;opacity:0.5}
+.fb-avatar.outer-avatar .fba-name{font-size:10px;color:var(--muted)}
+.fb-placeholder{
+  color:var(--muted);font-size:12px;text-align:center;padding:30px 0;
+}
+.fb-placeholder .fb-ph-emoji{font-size:40px;margin-bottom:8px;opacity:0.5}
 
-.anomaly{
-  background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);
-  border-radius:var(--radius-sm);padding:8px;font-size:11px;color:var(--warning);
+/* Right — Deliberation Content */
+.right-stage{
+  padding:12px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;
 }
 
-/* Center Stage */
-.center-stage{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:16px;position:relative;
+/* Chat Stream */
+.chat-stream{display:flex;flex-direction:column;gap:2px}
+.chat-msg{
+  display:flex;gap:10px;padding:6px 10px;border-radius:var(--radius-sm);
+  animation:msgIn 0.35s ease;transition:background 0.3s;
 }
-.stage-label{font-size:11px;color:var(--text-muted);letter-spacing:2px;margin-bottom:8px}
-.char-ring{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  grid-template-rows:repeat(2,1fr);
-  gap:12px 28px;
-  max-width:620px;width:100%;
+@keyframes msgIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
+.chat-msg .cm-avatar{
+  font-size:22px;width:32px;height:32px;min-width:32px;display:flex;
+  align-items:center;justify-content:center;border-radius:50%;
+  background:rgba(255,255,255,0.06);flex-shrink:0;
 }
-.char{
-  display:flex;flex-direction:column;align-items:center;
-  position:relative;transition:transform 0.3s;
+.chat-msg .cm-body{flex:1;min-width:0}
+.chat-msg .cm-meta{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.chat-msg .cm-name{font-size:11px;font-weight:600;color:var(--text)}
+.chat-msg .cm-role{font-size:9px;color:var(--dim)}
+.chat-msg .cm-text{
+  font-size:12px;line-height:1.65;color:var(--dim);
+  background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:0 10px 10px 10px;
+  word-break:break-word;
 }
-.char.speaking{transform:scale(1.1);z-index:5}
-.char.dimmed{opacity:0.3;filter:grayscale(0.5)}
-.char.thinking{opacity:0.7}
-.av-wrap{position:relative;width:60px;height:60px}
-.av{
-  width:60px;height:60px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  font-size:30px;position:relative;z-index:2;
-  box-shadow:0 2px 10px rgba(0,0,0,0.3);
+.chat-msg .cm-text .mention{color:var(--accent);font-weight:600}
+.chat-msg.highlight{background:rgba(56,189,248,0.06)}
+.chat-msg.speaking{background:rgba(56,189,248,0.08)}
+.chat-msg.round-divider{
+  justify-content:center;padding:12px 0;border:none;margin:8px 0;
+  border-top:1px dashed var(--border);
 }
-.av-glow{
-  position:absolute;inset:-5px;border-radius:50%;z-index:1;
-  opacity:0;transition:opacity 0.3s;
+.chat-msg.round-divider .rd-label{
+  font-size:10px;color:var(--muted);background:var(--bg);
+  padding:2px 12px;margin-top:-11px;letter-spacing:2px;
 }
-.char.speaking .av-glow{
-  opacity:1;
-  animation:gp 0.7s ease-in-out infinite alternate;
-}
-@keyframes gp{
-  from{box-shadow:0 0 10px 2px var(--g,rgba(56,189,248,0.4));transform:scale(1)}
-  to{box-shadow:0 0 24px 6px var(--g,rgba(56,189,248,0.7));transform:scale(1.06)}
-}
-.think-dots{
-  position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);
-  font-size:14px;letter-spacing:2px;color:var(--accent);display:none;
-}
-.char.thinking .think-dots{display:block}
-.cname{font-size:11px;font-weight:600;margin-top:5px;color:var(--text-dim);text-align:center}
-.crole{font-size:9px;color:var(--text-muted)}
-.char.speaking .cname{color:var(--text)}
 
-/* Speech Bubble */
-.bubble{
-  position:absolute;
-  background:var(--panel-bg);border:1px solid var(--border);
-  border-radius:var(--radius);padding:12px 16px;
-  max-width:240px;font-size:12px;line-height:1.5;
-  box-shadow:var(--shadow);
-  opacity:0;transform:translateY(6px) scale(0.95);
-  transition:all 0.35s cubic-bezier(0.4,0,0.2,1);
-  pointer-events:none;z-index:20;
+.section-title{
+  font-size:10px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:2px;padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:4px;
 }
-.bubble.show{opacity:1;transform:translateY(0) scale(1)}
-.bubble::after{
-  content:'';position:absolute;width:10px;height:10px;
-  background:var(--panel-bg);border:1px solid var(--border);
-  border-top:none;border-left:none;transform:rotate(45deg);
-}
-.bubble.top{bottom:calc(100% + 28px);left:50%;transform:translateX(-50%) translateY(6px)}
-.bubble.top.show{transform:translateX(-50%) translateY(0)}
-.bubble.top::after{bottom:-6px;left:50%;margin-left:-5px}
-.bubble.bot{top:calc(100% + 28px);left:50%;transform:translateX(-50%) translateY(-6px)}
-.bubble.bot.show{transform:translateX(-50%) translateY(0)}
-.bubble.bot::after{top:-6px;left:50%;margin-left:-5px;border:1px solid var(--border);border-bottom:none;border-right:none}
-.bmeta{display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-bottom:4px}
-.evbadges{display:flex;gap:3px;flex-wrap:wrap;margin-top:6px}
-.evbadge{font-size:9px;background:rgba(56,189,248,0.15);color:var(--accent);padding:1px 6px;border-radius:8px;font-family:var(--font-mono)}
 
-/* Right Panel */
-.right-panel{
-  background:var(--panel-bg);border-left:1px solid var(--border);
-  display:flex;flex-direction:column;overflow:hidden;
+/* Position Card */
+.pos-card{
+  background:var(--card);border-radius:var(--radius);padding:12px 16px;
+  border-left:4px solid var(--accent);animation:slideIn 0.4s ease;
 }
-.rp-hdr{
-  padding:14px;border-bottom:1px solid var(--border);
-  font-size:12px;font-weight:600;letter-spacing:1px;color:var(--text-dim);
+@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.pos-card .pc-hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.pos-card .pc-emoji{font-size:22px}
+.pos-card .pc-name{font-weight:600;font-size:13px}
+.pos-card .pc-group{font-size:10px;color:var(--dim)}
+.pos-card .pc-stance{
+  font-size:10px;padding:2px 8px;border-radius:10px;margin-left:auto;
 }
-.ts-list{flex:1;overflow-y:auto;padding:6px}
-.ts-i{
-  display:flex;gap:8px;padding:8px 10px;border-radius:var(--radius-sm);
-  margin-bottom:2px;border-left:3px solid transparent;cursor:pointer;
-}
-.ts-i:hover{background:rgba(255,255,255,0.03)}
-.ts-i.active{background:rgba(56,189,248,0.08);border-left-color:var(--accent)}
-.ts-av{
-  width:28px;height:28px;border-radius:50%;display:flex;
-  align-items:center;justify-content:center;font-size:16px;flex-shrink:0;
-}
-.ts-body{flex:1;min-width:0}
-.ts-hd{display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted)}
-.ts-nm{font-weight:600;color:var(--text-dim)}
-.ts-rp{font-size:9px;color:var(--accent2);margin-top:1px}
-.ts-tx{font-size:11px;line-height:1.4;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pos-card .pc-claims{margin:6px 0}
+.pos-card .pc-claims li{font-size:11px;margin:2px 0;color:var(--dim);list-style-position:inside}
+.pos-card .pc-meta{display:flex;gap:12px;font-size:9px;color:var(--muted);flex-wrap:wrap}
+.pos-card .pc-conf{font-family:monospace;color:var(--accent)}
+.pos-card .pc-evid{font-family:monospace;color:var(--accent2)}
+.pos-card .pc-nn{color:var(--warn)}
+.pos-card .pc-risks{color:var(--err)}
 
-/* Bottom Bar */
-.bottombar{
-  display:flex;align-items:center;justify-content:center;gap:12px;
-  padding:10px 24px;background:var(--panel-bg);border-top:1px solid var(--border);
+/* Round Summary */
+.round-summary{
+  background:var(--card);border-radius:var(--radius);padding:12px 16px;
+  border:1px solid var(--border);
 }
-.btn{
-  padding:8px 16px;border-radius:var(--radius-sm);border:1px solid var(--border);
-  background:var(--card-bg);color:var(--text);cursor:pointer;
-  font-size:12px;font-weight:600;transition:all 0.2s;
-  display:flex;align-items:center;gap:5px;
+.round-summary .rs-hd{font-weight:600;font-size:12px;margin-bottom:6px;color:var(--accent2)}
+.round-summary .rs-section{margin:4px 0}
+.round-summary .rs-label{font-size:9px;color:var(--muted);text-transform:uppercase}
+.round-summary .rs-item{font-size:10px;color:var(--dim);margin:2px 0;padding-left:8px}
+.round-summary .rs-major{color:var(--cond-support)}
+.round-summary .rs-minor{color:var(--warn)}
+
+/* Conflict Matrix */
+.conflict-matrix{
+  background:var(--card);border-radius:var(--radius);padding:12px 16px;
+  border:1px solid rgba(248,113,113,0.2);
 }
-.btn:hover{background:var(--border)}
-.btn.pri{background:var(--accent);color:#0f172a;border-color:var(--accent)}
-.btn.pri:hover{background:#7dd3fc}
-.btn:disabled{opacity:0.4;cursor:not-allowed}
-.prog-wrap{display:flex;align-items:center;gap:8px}
-.prog-bar{width:160px;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
-.prog-bar .fill{height:100%;background:var(--accent);border-radius:2px;transition:width 0.3s}
-.prog-txt{font-size:12px;color:var(--text-dim);font-family:var(--font-mono);min-width:50px;text-align:center}
+.conflict-matrix .cm-hd{font-weight:600;font-size:12px;margin-bottom:6px;color:var(--err)}
+.conflict-axis{
+  display:flex;align-items:center;gap:8px;padding:6px 0;
+  border-bottom:1px solid var(--border);font-size:11px;
+}
+.conflict-axis .ca-name{flex:1;min-width:0}
+.conflict-axis .ca-parties{font-size:9px;color:var(--dim)}
+.conflict-axis .ca-intensity{
+  font-size:9px;padding:1px 8px;border-radius:8px;
+}
+.ca-high{background:rgba(248,113,113,0.2);color:var(--err)}
+.ca-medium{background:rgba(245,158,11,0.2);color:var(--warn)}
+.ca-low{background:rgba(148,163,184,0.2);color:var(--neutral)}
+
+/* Proposal Card */
+.proposal-card{
+  background:var(--card);border-radius:var(--radius);padding:14px 18px;
+  border:2px solid var(--accent2);position:relative;
+}
+.proposal-card .pp-badge{
+  position:absolute;top:-10px;right:16px;
+  background:var(--accent2);color:#fff;font-size:10px;
+  padding:2px 10px;border-radius:10px;font-weight:600;
+}
+.proposal-card .pp-title{font-size:14px;font-weight:700;margin-bottom:8px}
+.proposal-card .pp-content{font-size:11px;line-height:1.6;color:var(--dim);white-space:pre-line}
+.proposal-card .pp-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:10px;color:var(--muted)}
+.proposal-card .pp-meta strong{color:var(--text)}
+.proposal-card .pp-criteria{margin-top:6px}
+.proposal-card .pp-criteria span{
+  font-size:9px;background:rgba(56,189,248,0.1);color:var(--accent);
+  padding:2px 6px;border-radius:8px;margin:1px 2px;display:inline-block;
+}
+
+/* Validation */
+.validation-bar{
+  display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:10px;
+}
+.validation-bar .v-item{padding:2px 8px;border-radius:8px}
+.v-pass{background:rgba(52,211,153,0.15);color:var(--ok)}
+.v-fail{background:rgba(248,113,113,0.15);color:var(--err)}
+.v-warn{background:rgba(245,158,11,0.15);color:var(--warn)}
 
 /* Overlay */
 .overlay{
-  position:fixed;inset:0;background:rgba(15,23,42,0.92);
+  position:fixed;inset:0;background:rgba(11,17,33,0.94);
   display:flex;align-items:center;justify-content:center;z-index:100;
   backdrop-filter:blur(8px);
 }
 .overlay.hidden{display:none}
 .ocard{
-  background:var(--panel-bg);border:1px solid var(--border);border-radius:var(--radius);
-  padding:36px;max-width:520px;width:90%;box-shadow:var(--shadow);text-align:center;
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:36px;max-width:500px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,0.5);text-align:center;
 }
-.ocard h2{font-size:22px;margin-bottom:6px}
+.ocard h2{font-size:20px;margin-bottom:4px}
 .ocard h2 span{color:var(--accent)}
-.ocard .sub{color:var(--text-dim);margin-bottom:24px;font-size:13px}
+.ocard .sub{color:var(--dim);margin-bottom:20px;font-size:12px}
 .ocard input{
-  width:100%;padding:12px;background:var(--card-bg);border:1px solid var(--border);
-  border-radius:var(--radius-sm);color:var(--text);font-size:14px;margin-bottom:10px;
+  width:100%;padding:10px;background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--text);font-size:13px;margin-bottom:8px;
   font-family:var(--font);
 }
 .ocard input:focus{outline:none;border-color:var(--accent)}
-.presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;justify-content:center}
+.presets{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px;justify-content:center}
 .preset{
-  font-size:11px;padding:5px 12px;border-radius:14px;background:var(--card-bg);
-  border:1px solid var(--border);color:var(--text-dim);cursor:pointer;transition:all 0.2s;
+  font-size:10px;padding:4px 10px;border-radius:12px;background:var(--card);
+  border:1px solid var(--border);color:var(--dim);cursor:pointer;transition:all 0.2s;
 }
 .preset:hover{border-color:var(--accent);color:var(--accent)}
+.btn{
+  padding:8px 16px;border-radius:var(--radius-sm);border:1px solid var(--border);
+  background:var(--card);color:var(--text);cursor:pointer;
+  font-size:12px;font-weight:600;transition:all 0.2s;
+  display:flex;align-items:center;gap:5px;
+}
+.btn:hover{background:var(--border)}
+.btn.pri{background:var(--accent);color:#0b1121;border-color:var(--accent)}
+.btn.pri:hover{background:#7dd3fc}
+.btn:disabled{opacity:0.4;cursor:not-allowed;pointer-events:none}
+
+/* Bottom Bar */
+.bottombar{
+  display:none;
+}
 
 /* Report Modal */
 .rpt-modal{
-  position:fixed;inset:0;background:rgba(15,23,42,0.85);
+  position:fixed;inset:0;background:rgba(11,17,33,0.9);
   display:flex;align-items:center;justify-content:center;z-index:200;
   backdrop-filter:blur(6px);
 }
 .rpt-modal.hidden{display:none}
 .rpt-c{
-  background:var(--panel-bg);border:1px solid var(--border);border-radius:var(--radius);
-  padding:28px;max-width:660px;width:90%;max-height:80vh;overflow-y:auto;
-  box-shadow:var(--shadow);font-size:13px;line-height:1.6;
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;
+  box-shadow:0 8px 40px rgba(0,0,0,0.5);font-size:12px;line-height:1.6;
 }
-.rpt-c h2{margin-bottom:16px}
-.rpt-c h3{margin:16px 0 6px;color:var(--accent);font-size:13px;text-transform:uppercase;letter-spacing:1px}
-.rpt-c ul{padding-left:18px}
-.rpt-c li{margin-bottom:4px;color:var(--text-dim)}
-.rpt-c table{width:100%;border-collapse:collapse;margin:8px 0}
-.rpt-c td{padding:6px 8px;border-bottom:1px solid var(--border)}
+.rpt-c h2{margin-bottom:12px}
+.rpt-c h3{margin:14px 0 4px;color:var(--accent);font-size:12px;text-transform:uppercase;letter-spacing:1px}
+.rpt-c ul{padding-left:16px}
+.rpt-c li{margin-bottom:3px;color:var(--dim)}
 
-::-webkit-scrollbar{width:5px}
+/* Mode Selection */
+.mode-tabs{display:flex;gap:0;margin-bottom:14px;border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border)}
+.mode-tab{flex:1;padding:8px 12px;background:var(--card);color:var(--dim);cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;text-align:center;border:none;font-family:var(--font)}
+.mode-tab:hover{color:var(--text);background:var(--border)}
+.mode-tab.active{background:var(--accent);color:#0b1121}
+.mode-tab .tab-icon{font-size:16px;display:block;margin-bottom:1px}
+.mode-tab .tab-sub{font-size:8px;font-weight:400;opacity:0.8}
+.quick-model-select select{width:100%;padding:7px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;font-family:var(--font);margin-bottom:8px}
+.quick-model-select select:focus{outline:none;border-color:var(--accent)}
+.model-group-label{font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:4px 0}
+.expert-agent-list{max-height:420px;overflow-y:auto;padding-right:2px;margin-bottom:6px}
+.expert-agent-row{display:flex;align-items:center;gap:4px;padding:5px 6px;background:var(--card);border-radius:4px;margin-bottom:3px;flex-wrap:wrap}
+.expert-agent-row .ea-emoji{font-size:14px;width:18px;text-align:center}
+.expert-agent-row .ea-name{font-size:10px;color:var(--dim);min-width:42px}
+.expert-agent-row select{flex:1;min-width:90px;padding:3px 4px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:9px;font-family:var(--font)}
+.expert-agent-row select:focus{outline:none;border-color:var(--accent)}
+.expert-agent-row .ea-key{width:100px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:9px;font-family:var(--font)}
+.expert-agent-row .ea-key:focus{outline:none;border-color:var(--accent)}
+.expert-agent-row .ea-key-eye{background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:1px 3px;font-family:var(--font)}
+.expert-agent-row .ea-key-eye:hover{color:var(--text)}
+.mode-info{font-size:9px;color:var(--muted);text-align:center;padding:5px;background:rgba(56,189,248,0.05);border-radius:4px;margin-bottom:6px}
+
+/* API Keys */
+.api-keys-section{margin-bottom:10px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
+.api-keys-toggle{
+  width:100%;padding:8px 12px;background:var(--card);color:var(--dim);
+  border:none;cursor:pointer;font-size:10px;font-weight:600;text-align:left;
+  font-family:var(--font);display:flex;align-items:center;gap:6px;
+  justify-content:space-between;transition:all 0.2s;
+}
+.api-keys-toggle:hover{color:var(--text);background:var(--border)}
+.api-keys-toggle .akt-arrow{transition:transform 0.2s;font-size:8px}
+.api-keys-toggle.open .akt-arrow{transform:rotate(180deg)}
+.api-keys-body{display:none;padding:8px 10px;background:rgba(0,0,0,0.15)}
+.api-keys-body.open{display:block}
+.api-key-row{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.api-key-row:last-child{margin-bottom:0}
+.api-key-row label{font-size:9px;color:var(--dim);min-width:60px;white-space:nowrap}
+.api-key-row input{
+  flex:1;padding:4px 8px;background:var(--bg);border:1px solid var(--border);
+  border-radius:3px;color:var(--text);font-size:10px;font-family:var(--font);
+}
+.api-key-row input:focus{outline:none;border-color:var(--accent)}
+.api-key-eye{
+  background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;
+  padding:2px 4px;font-family:var(--font);
+}
+.api-key-eye:hover{color:var(--text)}
+.ak-status{font-size:9px;padding:2px 0;text-align:center}
+.ak-status.has-keys{color:var(--ok)}
+.ak-status.no-keys{color:var(--warn)}
+
+/* Facilitor avatar cards (Host + Reviewer) above fishbowl */
+.facilitator-avatars{
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  padding:6px 8px 8px;flex-shrink:0;
+}
+.fac-avatar-card{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:8px 12px;background:var(--card);border-radius:var(--radius);
+  border:2px solid var(--border);transition:all 0.35s;min-width:70px;
+}
+.fac-avatar-card.speaking{border-color:var(--accent);box-shadow:0 0 18px rgba(56,189,248,0.22);background:#1e3050}
+.fac-avatar-card .fac-emoji{
+  font-size:24px;width:40px;height:40px;display:flex;align-items:center;
+  justify-content:center;border-radius:50%;transition:all 0.3s;
+}
+.fac-avatar-card .fac-name{font-size:12px;font-weight:600;color:var(--text)}
+.fac-avatar-card .fac-role{font-size:9px;color:var(--dim)}
+.fac-avatar-card .fac-badge{
+  font-size:8px;padding:2px 8px;border-radius:8px;font-weight:600;
+}
+.fac-badge-host{background:rgba(251,191,36,0.2);color:#fbbf24}
+.fac-badge-rev{background:rgba(52,211,153,0.2);color:#34d399}
+.fac-sep{color:var(--border);font-size:18px;padding-bottom:14px}
+
+/* Chat msg for facilitator */
+.chat-msg.facilitator .cm-text{background:rgba(251,191,36,0.06);border:1px dashed rgba(251,191,36,0.2)}
+.chat-msg.reviewer-msg .cm-text{background:rgba(52,211,153,0.06);border:1px dashed rgba(52,211,153,0.2)}
+
+::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 </style>
 </head>
 <body>
+<div id="fileWarning" style="display:none;position:fixed;inset:0;background:#0b1121;z-index:99999;display:none;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;color:#e0e6f0;text-align:center;padding:40px;">
+  <div style="font-size:64px;margin-bottom:20px;">⚠️</div>
+  <h2 style="margin-bottom:12px;">请不要直接双击打开此文件</h2>
+  <p style="color:#8899b4;max-width:480px;margin-bottom:24px;line-height:1.7;">
+    此页面需要配合后端 API 服务器运行。<br>
+    请双击运行项目目录下的 <code style="background:#1a2740;padding:2px 8px;border-radius:4px;">启动服务器.bat</code><br>
+    或直接在浏览器地址栏输入以下地址：
+  </p>
+  <a href="http://localhost:8765" style="color:#38bdf8;font-size:20px;font-weight:700;text-decoration:none;padding:12px 32px;border:2px solid #38bdf8;border-radius:8px;">http://localhost:8765</a>
+</div>
+<script>
+if (location.protocol === 'file:') {
+  document.getElementById('fileWarning').style.display = 'flex';
+}
+</script>
 
 <div class="app">
+  <!-- Top Bar -->
   <header class="topbar">
-    <div class="logo"><span class="icon">?</span><h1>多智能体<span>议事厅</span></h1></div>
+    <div class="logo">? 多智能体<span>议事厅</span></div>
     <div class="topic-tag" id="topicDisplay">等待开始...</div>
-    <div class="status-badge idle" id="statusBadge">? 等待开始</div>
+    <div class="sop-bar" id="sopBar"></div>
+    <div class="status-badge idle" id="statusBadge">? 就绪</div>
+    <button class="btn pri" id="btnStart" disabled>? 开始议事</button>
+    <button class="btn" id="btnReport" disabled>? 议事报告</button>
   </header>
 
+  <!-- Main -->
   <div class="main">
-    <aside class="left-panel">
-      <div class="mcard">
-        <div class="ml">? 发言公平性 Gini</div>
-        <div class="mv" id="mGini" style="color:var(--success)">--</div>
-        <div class="mbar"><div class="fill" id="mGiniBar" style="width:0%;background:var(--success)"></div></div>
+    <!-- Left: Stakeholder Avatars -->
+    <aside class="left-panel" id="leftPanel">
+      <div style="color:var(--muted);text-align:center;padding:20px;font-size:11px">
+        等待议题确认...
       </div>
-      <div class="mcard">
-        <div class="ml">? Grounding 率</div>
-        <div class="mv" id="mGround" style="color:var(--accent)">--</div>
-        <div class="mbar"><div class="fill" id="mGroundBar" style="width:0%;background:var(--accent)"></div></div>
-      </div>
-      <div class="mcard">
-        <div class="ml">? 共识度</div>
-        <div class="mv" id="mConsensus" style="color:var(--accent2)">--</div>
-        <div class="mbar"><div class="fill" id="mConsensusBar" style="width:0%;background:var(--accent2)"></div></div>
-      </div>
-      <div class="mcard">
-        <div class="ml">? 极化程度</div>
-        <div class="mv" id="mPol" style="color:var(--warning)">--</div>
-        <div class="mbar"><div class="fill" id="mPolBar" style="width:0%;background:var(--warning)"></div></div>
-      </div>
-      <div class="mcard">
-        <div class="ml">? 发言占比</div>
-        <div class="sbars" id="speakerBars"></div>
-      </div>
-      <div id="anomalyContainer"></div>
     </aside>
 
-    <section class="center-stage">
-      <div class="stage-label">? 议 事 厅 ?</div>
-      <div class="char-ring" id="characterRing"></div>
-    </section>
-
-    <aside class="right-panel">
-      <div class="rp-hdr">? 议事记录</div>
-      <div class="ts-list" id="transcriptList">
-        <div style="color:var(--text-muted);text-align:center;padding:40px 16px;font-size:12px">
-          <div style="font-size:40px;margin-bottom:12px">?</div>
-          点击「开始议事」启动<br>多智能体实时议事
+    <!-- Center: Facilitators + Fishbowl Discussion Frame -->
+    <section class="center-fishbowl" id="centerFishbowl">
+      <div class="facilitator-avatars" id="facilitatorAvatars" style="display:none">
+        <div class="fac-avatar-card" id="facCardMod">
+          <div class="fac-emoji" style="background:#fef3c7;border:2px solid #fbbf24">🎤</div>
+          <div class="fac-name">议事主持人</div>
+          <div class="fac-role">流程引导</div>
+          <span class="fac-badge fac-badge-host">主持</span>
+        </div>
+        <span class="fac-sep">×</span>
+        <div class="fac-avatar-card" id="facCardRev">
+          <div class="fac-emoji" style="background:#d1fae5;border:2px solid #34d399">🔍</div>
+          <div class="fac-name">议事评审员</div>
+          <div class="fac-role">质量诊断</div>
+          <span class="fac-badge fac-badge-rev">评审</span>
         </div>
       </div>
-    </aside>
-  </div>
+      <div class="fb-placeholder">
+        <div class="fb-ph-emoji">?</div>
+        <div>鱼缸讨论框</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">内圈参与者将在此显示</div>
+      </div>
+    </section>
 
-  <footer class="bottombar">
-    <button class="btn pri" id="btnStart" disabled>? 开始议事</button>
-    <div class="prog-wrap">
-      <div class="prog-bar"><div class="fill" id="progFill" style="width:0%"></div></div>
-      <span class="prog-txt" id="progText">0 / 0</span>
-    </div>
-    <button class="btn" id="btnReport" disabled>? 议事报告</button>
-  </footer>
+    <!-- Right: Deliberation Content -->
+    <section class="right-stage" id="rightStage">
+      <div style="color:var(--muted);text-align:center;padding:60px 16px;font-size:13px">
+        <div style="font-size:48px;margin-bottom:12px">?</div>
+        <div>选择议题后点击「开始议事」</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:8px">基于 SOP + Fishbowl 机制的结构化多智能体议事</div>
+      </div>
+    </section>
+  </div>
 </div>
 
 <!-- Start Overlay -->
 <div class="overlay" id="startOverlay">
   <div class="ocard">
     <h2>? 多智能体<span>议事厅</span></h2>
-    <p class="sub">面向社区更新与公共空间治理<br>可配置多智能体议事系统</p>
+    <p class="sub">SOP 驱动 · 鱼缸讨论 · 结构化工件<br>面向社区公共空间治理</p>
     <input type="text" id="topicInput" value="小区门口夜市是否应该保留？" placeholder="输入议题...">
     <div class="presets">
       <button class="preset" data-topic="小区门口夜市是否应该保留？">? 夜市治理</button>
       <button class="preset" data-topic="老旧小区广场舞是否应该继续？">? 广场舞争议</button>
       <button class="preset" data-topic="老旧小区是否应该加装电梯？">? 电梯加装</button>
     </div>
-    <button class="btn pri" id="btnEnter" style="width:100%;justify-content:center;padding:14px;font-size:15px">
+
+    <!-- ── Mode Selection ── -->
+    <div class="mode-tabs" id="modeTabs">
+      <button class="mode-tab active" onclick="switchMode('quick')" id="modeTabQuick">
+        <span class="tab-icon">⚡</span>快速模式
+        <span class="tab-sub">统一基座模型</span>
+      </button>
+      <button class="mode-tab" onclick="switchMode('expert')" id="modeTabExpert">
+        <span class="tab-icon">?</span>专家模式
+        <span class="tab-sub">分别指定模型</span>
+      </button>
+    </div>
+
+    <!-- Quick Mode -->
+    <div id="quickModeConfig">
+      <div class="model-group-label">? 统一基座模型</div>
+      <div class="quick-model-select">
+        <select id="quickModelSelect">
+          <optgroup label="── DeepSeek ──">
+            <option value="deepseek-v4-pro" selected>DeepSeek V4 Pro</option>
+            <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+            <option value="deepseek-chat">DeepSeek V3 (chat)</option>
+            <option value="deepseek-reasoner">DeepSeek R1 (reasoner)</option>
+          </optgroup>
+          <optgroup label="── OpenAI ──">
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
+          </optgroup>
+          <optgroup label="── Anthropic Claude ──">
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            <option value="claude-opus-4-7">Claude Opus 4.7</option>
+            <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+          </optgroup>
+          <optgroup label="── Google ──">
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+          </optgroup>
+          <optgroup label="── 阿里通义 ──">
+            <option value="qwen-max">Qwen Max</option>
+            <option value="qwen-plus">Qwen Plus</option>
+          </optgroup>
+          <optgroup label="── 智谱 ──">
+            <option value="glm-4-plus">GLM-4 Plus</option>
+          </optgroup>
+          <optgroup label="── 月之暗面 ──">
+            <option value="moonshot-v1-8k">Moonshot v1</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="mode-info">? 快速模式：所有 Agent 统一使用上述基座模型</div>
+    </div>
+
+    <!-- Expert Mode -->
+    <div id="expertModeConfig" style="display:none">
+      <div class="model-group-label">? 为每个角色指定基座模型</div>
+      <div class="expert-agent-list" id="expertAgentList"></div>
+      <div class="mode-info">? 专家模式：不同角色可采用不同模型，如利益方用低成本模型、主持/评审用高性能模型</div>
+    </div>
+
+    <!-- ── API Keys ── -->
+    <div class="api-keys-section" id="apiKeysSection">
+      <button class="api-keys-toggle" id="apiKeysToggle" onclick="toggleApiKeys()">
+        ? API 密钥配置 <span class="akt-arrow">?</span>
+      </button>
+      <div class="api-keys-body" id="apiKeysBody">
+        <div style="font-size:8px;color:var(--muted);margin-bottom:4px">至少填写一个模型的API Key即可启用真实API议事</div>
+        <div class="api-key-row" id="akRow-openai">
+          <label>OpenAI</label>
+          <input type="password" id="apikey-openai" placeholder="sk-..." oninput="onApiKeyChange()">
+          <button class="api-key-eye" onclick="toggleKeyVisibility('apikey-openai', this)" tabindex="-1">?</button>
+        </div>
+        <div class="api-key-row" id="akRow-anthropic">
+          <label>Anthropic</label>
+          <input type="password" id="apikey-anthropic" placeholder="sk-ant-..." oninput="onApiKeyChange()">
+          <button class="api-key-eye" onclick="toggleKeyVisibility('apikey-anthropic', this)" tabindex="-1">?</button>
+        </div>
+        <div class="api-key-row" id="akRow-deepseek">
+          <label>DeepSeek</label>
+          <input type="password" id="apikey-deepseek" placeholder="sk-..." oninput="onApiKeyChange()">
+          <button class="api-key-eye" onclick="toggleKeyVisibility('apikey-deepseek', this)" tabindex="-1">?</button>
+        </div>
+        <div class="api-key-row" id="akRow-qwen">
+          <label>通义千问</label>
+          <input type="password" id="apikey-qwen" placeholder="sk-..." oninput="onApiKeyChange()">
+          <button class="api-key-eye" onclick="toggleKeyVisibility('apikey-qwen', this)" tabindex="-1">?</button>
+        </div>
+        <div class="api-key-row" id="akRow-zhipu">
+          <label>智谱</label>
+          <input type="password" id="apikey-zhipu" placeholder="..." oninput="onApiKeyChange()">
+          <button class="api-key-eye" onclick="toggleKeyVisibility('apikey-zhipu', this)" tabindex="-1">?</button>
+        </div>
+        <div class="api-key-row" id="akRow-moonshot">
+          <label>月之暗面</label>
+          <input type="password" id="apikey-moonshot" placeholder="sk-..." oninput="onApiKeyChange()">
+          <button class="api-key-eye" onclick="toggleKeyVisibility('apikey-moonshot', this)" tabindex="-1">?</button>
+        </div>
+        <div class="api-key-row" id="akRow-gemini">
+          <label>Gemini</label>
+          <input type="password" id="apikey-gemini" placeholder="AIza..." oninput="onApiKeyChange()">
+          <button class="api-key-eye" onclick="toggleKeyVisibility('apikey-gemini', this)" tabindex="-1">?</button>
+        </div>
+        <div class="ak-status no-keys" id="akStatus">? 未配置API Key — 将使用模板模拟模式</div>
+      </div>
+    </div>
+
+    <button class="btn pri" id="btnEnter" style="width:100%;justify-content:center;padding:12px;font-size:14px">
       ? 进入议事厅
     </button>
-    <p style="font-size:10px;color:var(--text-muted);margin-top:12px">
-      当前为嵌入式演示模式，Agent 基于角色设定和证据自主生成发言。<br>
-      如需 LLM 驱动，请启动后端：<code>python api/main.py</code>
+    <p style="font-size:9px;color:var(--muted);margin-top:10px" id="modeHint">
+      当前为<strong>快速模式</strong> · 预编排演示数据<br>
+      <span style="color:var(--accent2)">可切换为专家模式为各角色分别指定模型</span>
     </p>
   </div>
 </div>
@@ -337,331 +607,1313 @@ body{
 
 <script>
 // ============================================================
-// DATA
+// GLOBAL ERROR HANDLER — show JS errors visibly
 // ============================================================
-const AGENTS = [
-  { id:'a0', name:'夜市摊贩代表', role:'直接受益者', emoji:'?', color:'#f59e0b', bg:'#fef3c7', stance:0.8 },
-  { id:'a1', name:'周边居民代表', role:'直接受影响者', emoji:'?', color:'#ef4444', bg:'#fee2e2', stance:-0.7 },
-  { id:'a2', name:'夜间消费者代表', role:'间接受益者', emoji:'?', color:'#8b5cf6', bg:'#ede9fe', stance:0.5 },
-  { id:'a3', name:'街道办治理人员', role:'治理方', emoji:'?', color:'#3b82f6', bg:'#dbeafe', stance:0.1 },
-  { id:'a4', name:'环卫人员代表', role:'间接影响者', emoji:'?', color:'#10b981', bg:'#d1fae5', stance:-0.3 },
-  { id:'a5', name:'城市设计师', role:'专业观察者', emoji:'?', color:'#ec4899', bg:'#fce7f3', stance:0.2 },
+window.addEventListener('error', function(e) {
+  var stage = document.getElementById('rightStage');
+  var stack = (e.error && e.error.stack) ? e.error.stack : '';
+  if (stage) {
+    stage.innerHTML = '<div style="padding:40px;text-align:center;color:#f87171;"><div style="font-size:48px">💥</div><h3>JavaScript 错误</h3><pre style="text-align:left;margin:12px auto;max-width:700px;color:#f87171;font-size:11px;background:#1a1020;padding:12px;border-radius:8px;overflow:auto;white-space:pre-wrap;word-break:break-all;">' + (e.message || '未知错误') + '\n\n' + (e.filename || '') + ':' + (e.lineno || '') + '\n\nSTACK:\n' + stack + '</pre><p style="color:var(--dim);font-size:10px">请将此错误信息反馈给开发者</p></div>';
+  }
+});
+window.addEventListener('unhandledrejection', function(e) {
+  var stage = document.getElementById('rightStage');
+  var stack = (e.reason && e.reason.stack) ? e.reason.stack : '';
+  if (stage) {
+    stage.innerHTML = '<div style="padding:40px;text-align:center;color:#f87171;"><div style="font-size:48px">💥</div><h3>Promise 错误</h3><pre style="text-align:left;margin:12px auto;max-width:700px;color:#f87171;font-size:11px;background:#1a1020;padding:12px;border-radius:8px;overflow:auto;white-space:pre-wrap;word-break:break-all;">' + String(e.reason || '未知错误') + '\n\nSTACK:\n' + stack + '</pre></div>';
+  }
+  console.error('Unhandled rejection:', e.reason);
+});
+
+// ============================================================
+// MULTI-AGENT DELIBERATION ENGINE (embedded, real-time)
+// ============================================================
+
+const R = {
+  seed: Math.random(),
+  next() { this.seed = (this.seed * 16807 + 0) % 2147483647; return (this.seed - 1) / 2147483646; },
+  pick(arr) { return arr[Math.floor(this.next() * arr.length)]; },
+  shuffle(arr) { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(this.next() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
+  clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+};
+
+// ── Topic analysis ──────────────────────────────────────────
+function analyzeTopic(topic) {
+  const profiles = {
+    '夜市': { type:'公共空间使用与民生经济', entities:{ venue:'夜市', subject:'摊位', issue1:'噪声', issue2:'垃圾', issue3:'油烟', group1:'摊贩', group2:'居民', group3:'消费者' }, conflictAxes:['经济生存权 vs 居住环境权','消费便利 vs 公共秩序'], question:'夜市是否应该保留？如果保留，应该设置哪些治理条件？', complexity:7, policyRef:'市城管委关于夜间经济的指导意见', context:'某小区门口夜市已自发形成三年，约40个摊位。过去三个月收到噪声/油烟/垃圾投诉47条。' },
+    '广场舞': { type:'公共空间使用与文化权利', entities:{ venue:'小区广场', subject:'广场舞活动', issue1:'噪声', issue2:'空间占用', issue3:'代际冲突', group1:'老年舞蹈队', group2:'周边居民', group3:'社区管理者' }, conflictAxes:['文化娱乐权 vs 安静权','老年人活动需求 vs 其他居民空间需求'], question:'广场舞是否应该继续？如何平衡不同群体的空间使用权？', complexity:6, policyRef:'《噪声污染防治法》及社区公共空间管理办法', context:'某老旧小区广场舞团队约60人，每晚7:30-9:30活动。周边居民投诉音响音量过大。' },
+    '电梯': { type:'基础设施改造与利益分配', entities:{ venue:'老旧小区', subject:'电梯加装', issue1:'费用分摊', issue2:'施工影响', issue3:'房屋安全', group1:'高楼层住户', group2:'低楼层住户', group3:'社区居委会' }, conflictAxes:['出行便利需求 vs 经济负担能力','高层需求 vs 低层权益'], question:'老旧小区是否应该加装电梯？费用如何分摊？', complexity:8, policyRef:'《既有住宅加装电梯指导意见》', context:'某7层老旧住宅楼（无电梯），高楼层老年住户出行困难，低楼层住户担心采光、噪音和房价贬值。' }
+  };
+  for (const [key, profile] of Object.entries(profiles)) {
+    if (topic.includes(key)) return { key, ...profile };
+  }
+  return { key:'general', ...profiles['夜市'] };
+}
+
+// ── Evidence cards ───────────────────────────────────────────
+const EVIDENCE_DB = [
+  { id:'E-NM-001', source:'12345投诉', quote:'夜市是我们唯一的生活来源，父母身体不好无法做其他工作，请求政府保留摊位。', concern:'经济生存', matchArchetypes:['直接受益者','治理方'] },
+  { id:'E-NM-002', source:'12345投诉', quote:'每晚持续到凌晨1点，划拳声吵闹，油烟飘进卧室，孩子写作业都受影响。', concern:'居住环境', matchArchetypes:['直接受影响者','治理方'] },
+  { id:'E-NM-003', source:'12345投诉', quote:'过去三个月收到47条关于噪声和油烟的投诉，涉及12个不同摊位。', concern:'数据统计', matchArchetypes:['直接受影响者','治理方','专业观察者'] },
+  { id:'E-NM-005', source:'政府政策', quote:'市城管委关于夜间经济的指导意见：对符合条件的夜间经济集聚区，应给予规范引导而非一刀切禁止。', concern:'政策依据', matchArchetypes:['治理方','专业观察者','直接受益者'] },
+  { id:'E-NM-007', source:'学术研究', quote:'夜间经济集聚区的成功案例中，90%以上采用了"摊位编号+限时经营+卫生押金"三位一体的管理模式。', concern:'治理方案', matchArchetypes:['专业观察者','治理方'] },
+  { id:'E-NM-008', source:'环卫反馈', quote:'夜市区域的清扫时间比普通区域多出2倍，垃圾量增加约150%，需增派2名清扫人员。', concern:'环卫成本', matchArchetypes:['间接影响者','治理方'] },
+  { id:'E-NM-012', source:'新闻', quote:'杭州某夜市通过"摊位积分制"实现自治管理，积分高者可优先选择摊位位置，投诉率下降62%。', concern:'成功案例', matchArchetypes:['治理方','专业观察者','直接受益者'] },
+  { id:'E-NM-013', source:'法院案例', quote:'某市因噪音扰民引发了摊贩与居民的群体冲突事件，最终双方均受到治安处罚。', concern:'风险警示', matchArchetypes:['治理方','直接受影响者','直接受益者'] },
 ];
 
-const TURNS = [
-  // Opening round
-  { a:0, s:0.8,  r:null,          e:['E-NM-001','E-NM-011'], c:'我们摊贩在夜市经营多年，这是许多家庭的主要收入来源。根据市民服务热线工单记录，部分摊贩明确表示"夜市是我们唯一的生活来源，请求保留摊位"。我们不反对规范化管理，但一刀切取缔会导致数十个家庭失去生计。如果保留，我们愿意接受摊位编号、限时经营和垃圾自清。' },
-  { a:1, s:-0.7, r:'夜市摊贩代表', e:['E-NM-002','E-NM-003'], c:'我理解摊贩的生存压力，但居民不是反对所有夜市，而是反对现在这种无边界、无闭市时间、无垃圾责任的经营方式。12345 工单显示，过去三个月收到 47 条关于噪声和油烟的投诉。如果要保留，必须明确闭市时间、摊位边界和投诉响应机制。' },
-  { a:2, s:0.5,  r:'周边居民代表', e:['E-NM-006'],             c:'夜市提供了社区周边最便利和低价的小吃选择。关掉夜市后，周边没有替代的平价餐饮，尤其对加班晚归的年轻人。但我同意居民代表的担忧，目前的经营方式确实需要改进。如果设置合理的闭市时间和卫生标准，消费者也愿意配合。' },
-  { a:3, s:0.1,  r:'夜间消费者代表', e:['E-NM-005','E-NM-014'], c:'街道办的态度很明确：不希望简单一关了之，也不希望放任不管。根据市城管委关于夜间经济的指导意见，"对符合条件的夜间经济集聚区，应给予规范引导而非一刀切禁止"。我们需要一个试点方案，而不是在保留和取缔之间二选一。' },
-  { a:4, s:-0.3, r:'街道办治理人员', e:['E-NM-008','E-NM-015'], c:'前面几方都谈了自己的利益，但有一个问题被忽视了：闭市后垃圾最后落到谁身上？根据环卫部门的反馈，夜市区域的清扫时间比普通区域多出 2 倍。是否保留夜市，必须同步讨论垃圾桶配置、清运频次和额外清扫经费，否则治理成本只是被转嫁了。' },
-  { a:5, s:0.2,  r:'环卫人员代表',   e:['E-NM-007','E-NM-016'], c:'我建议跳出"保留 vs 取缔"的二元框架。作为城市设计师，我提议做一个四周试点方案：划定摊位线、通行线和消防缓冲线；设置闭市时间；每个摊位负责自清垃圾并缴纳卫生押金；每周记录投诉量、垃圾量、人流阻塞点。试点结束后依据数据再决定。' },
-  // Discussion
-  { a:0, s:0.6,  r:'城市设计师',     e:['E-NM-001'],             c:'我们接受试点方案和摊位编号，也同意缴纳卫生押金。但我有两个底线：第一，摊位数量和位置要有稳定性，不能今天说可以、明天就清退；第二，如果试点数据达标，就应该允许长期经营，而不是无限期"试点"。' },
-  { a:1, s:-0.4, r:'夜市摊贩代表',   e:['E-NM-002','E-NM-010'], c:'摊贩代表提的"稳定性"要求合理，但反过来，如果试点期间投诉没有明显下降，也应该有明确的退出机制。居民最不能接受的是"每次都说管，每次都管不住"。我同意设计师的"数据驱动"思路，但要求试点方案中明确达标和退出的量化标准。' },
-  { a:3, s:0.15, r:'周边居民代表',   e:['E-NM-005'],             c:'居民代表提的非常关键。街道办可以牵头制定试点的 KPI：夜间投诉量下降 50% 以上、环卫评分不低于 C 级、消防通道无占用记录。连续两周不达标触发整改，连续一个月不达标重新评估。这样各方都有明确的预期。' },
-  { a:4, s:-0.1, r:'街道办治理人员', e:['E-NM-008'],             c:'我愿意接受这个方案，但需要补充一点资金问题：试点期间的额外垃圾桶、增派清扫人员、油污清洗设备，这些费用从哪里来？我建议摊位费中单列一项环卫附加费，专款专用。否则方案再漂亮，没人出钱还是落不了地。' },
-  { a:5, s:0.25, r:'环卫人员代表',   e:['E-NM-007','E-NM-016'], c:'环卫代表提出的资金问题很关键。我补充一个具体建议：试点方案应该包含成本测算表——摊位卫生押金、环卫附加费、街道补贴三方共担。同时我建议在报告中明确标注：AI 无法替代真实成本核算，需要街道办与环卫部门实地测算。' },
-  { a:2, s:0.4,  r:'城市设计师',     e:['E-NM-006'],             c:'作为消费者，我愿意接受试点期间的闭市时间限制和可能的轻微涨价。但我提一个需求：闭市时间能否根据季节调整？夏天晚上 10:30 可能太早。另外，如果能有一个投诉或建议的入口，消费者也可以帮助监督摊位卫生。' },
-  { a:1, s:-0.3, r:'夜间消费者代表', e:['E-NM-003'],             c:'消费者提出的季节性调整可以考虑，但需要明确：调整闭市时间的前提是噪声可控。夏天开窗睡觉，噪声影响更大。我建议试点期间闭市时间统一为冬季 10:00、夏季 10:30，并且 9:30 后禁止使用高噪声设备。' },
-  { a:0, s:0.5,  r:'周边居民代表',   e:['E-NM-011'],             c:'9:30 后禁止高噪声设备，我们可以做到。但我还想提一个实际问题：摊位边界如何划定？谁来监督？如果相邻摊位越界产生纠纷怎么办？这需要在试点方案中明确边界线和纠纷调解机制。' },
-  { a:3, s:0.2,  r:'夜市摊贩代表',   e:['E-NM-014'],             c:'关于摊位边界和纠纷调解，街道办可以做到：第一，用地面标线明确每个摊位范围；第二，安排夜间巡查人员每小时巡查一次；第三，建立快速投诉渠道，居民和摊贩都可以通过小程序上报问题。这些不涉及高成本，现有的网格化管理体系就能支持。' },
-  // Summary
-  { a:5, s:0.3,  r:'街道办治理人员', e:['E-NM-007'],             c:'各方现在已经达成了几个关键共识：试点而非一刀切、摊位编号与边界线、卫生押金与环卫附加费、分季节闭市时间、数据驱动的达标与退出机制。剩下几个需要真实调研的问题我整理一下：实际环卫增额成本、合适的摊位费标准、周边交通流量基线数据。这些 AI 无法替代实地调研。' },
-  { a:4, s:-0.05,r:'城市设计师',     e:['E-NM-015'],             c:'我同意设计师的总结。另外我还想再强调一次：我的底线仍然是环卫经费不能被遗忘。如果试点方案最终不提资金分摊，我保留反对意见。这不是反对夜市本身，而是反对没有配套资源的治理方案。' },
-  { a:3, s:0.2,  r:null,             e:['E-NM-005'],             c:'感谢各方今天的讨论。我来做最终总结：第一，各方同意以四周试点替代一刀切决策；第二，试点方案包含摊位编号与边界、环卫附加费、分季节闭市时间、噪声管控、投诉响应和达标/退出 KPI；第三，环卫代表的资金诉求和居民代表的退出机制诉求已纳入方案；第四，部分问题（实际环卫成本、摊位费标准、交通基线数据）需要实地调研后确定。议事报告将记录所有共识、分歧和待调研问题，供街道办决策参考。' },
+// ── Agent archetype configs ──────────────────────────────────
+const ARCHETYPE_CONFIGS = {
+  '直接受益者': {
+    label:'直接受益者', speakingTraits:{ tone:'务实、恳切，强调生存权', strategy:'以生计数据和个人故事建立共情', negotiationStyle:'接受规范但要求稳定预期' },
+    openers: ['大家好，我是{name}。{topic}这件事直接关系到我们{g1}的生存。{interest0}。', '作为{g1}的代表，我想先说一个最基本的事实：{interest0}。我们不反对规范化管理，但一刀切式的取缔将导致{consequence}。'],
+    responders: ['我听到了{reply_to}的观点。{ack_brief}。但我必须强调：{interest0}。{evidence_ref}。{proposal}', '{reply_to}说的问题确实存在。{ack_detail}。但我想请大家注意，{interest0}不是可以忽略的因素。{evidence_ref}。我们可以接受{concession}，前提是{condition}。', '理解{reply_to}的担忧。{ack_brief}。从我们的角度，{interest0}。我愿意提出一个折中方案：{proposal}。'],
+    closers: ['经过今天的讨论，我再次确认了我们的底线：{bottom_line}。在满足这个前提下，我们愿意配合试点方案。'],
+    bottomLines: ['摊位数量和位置的稳定性必须有保障', '经营权的长期预期不能是无限期"试点"', '基本生计不能被忽视'],
+  },
+  '直接受影响者': {
+    label:'直接受影响者', speakingTraits:{ tone:'理性中带着急切，用具体数据和经历说话', strategy:'以投诉数据和生活经历构建问题的严重性', negotiationStyle:'接受有条件保留但要求量化标准和退出机制' },
+    openers: ['我是{name}。{topic}这件事，我们{g2}是每天直接承受后果的人。{interest0}。{evidence_ref}。', '各位好。作为{g2}的代表，我想先摆一组数据：{evidence_ref}。这不是个别现象。{interest0}。'],
+    responders: ['我听到了{reply_to}的诉求，也能理解。{ack_brief}。但{bridge_to_own}。{evidence_ref}。{demand}', '{reply_to}提的{mention_point}我部分同意。{ack_detail}。但我必须指出：{critique}。我们的底线是：{bottom_line}。'],
+    closers: ['今天的讨论让我看到了各方让步的诚意。但我必须再次强调：{bottom_line}。没有配套约束的方案，我们不接受。'],
+    bottomLines: ['必须有明确的闭市时间和执行机制', '投诉响应必须有量化KPI和退出机制', '环境卫生责任必须有明确归属'],
+  },
+  '间接受益者': {
+    label:'间接受益者', speakingTraits:{ tone:'轻松但说理清楚', strategy:'从消费者角度补充易被忽视的需求', negotiationStyle:'在核心问题上配合主流意见，提出灵活调整建议' },
+    openers: ['大家好，我是{name}。作为{g3}，我们的声音通常不大，但{topic}确实影响我们的日常生活。{interest0}。', '各位讨论的很热烈，我想从一个可能被忽视的角度补充。{interest0}。'],
+    responders: ['听了{reply_to}的观点，我想补充{g3}的视角。{ack_brief}。{interest0}。我建议{flexible_proposal}。', '我理解双方的立场。{reply_to}提到的{mention_point}，从消费者角度看，{consumer_perspective}。'],
+    closers: ['作为{g3}，我的核心诉求很简单：{bottom_line}。其他方面，我愿意配合大多数人的共识。'],
+    bottomLines: ['消费者的基本需求应该被看见', '替代方案不能比现状更差', '季节性/灵活调整机制应该纳入方案'],
+  },
+  '治理方': {
+    label:'治理方', speakingTraits:{ tone:'中立、专业，强调法规框架和可行性', strategy:'引用政策依据，在各利益方之间寻找平衡', negotiationStyle:'不选边站，推动从"支持vs反对"转向"条件设计"' },
+    openers: ['感谢各位参与。作为{name}，我们的职责是平衡各方诉求、在法律框架内寻找可行方案。{policy_ref}。', '大家好，我是{name}。{topic}不是一个简单的"支持或反对"问题，而是一个"在什么条件下可以/不可以"的问题。'],
+    responders: ['刚才{reply_to}和前面的发言都很有价值。{ack_brief}。从管理角度，{bridge_solution}。{evidence_ref}。', '{reply_to}提的很关键。{ack_brief}。在政策层面，{policy_ref}。所以我提议{concrete_proposal}。', '各方意见都有道理。{ack_brief}。让我们把讨论从立场之争转向条件设计：{framework_proposal}。'],
+    closers: ['感谢各方今天的真诚讨论。我来做最终总结：\n\n第一，{consensus1}；\n第二，{consensus2}；\n第三，{consensus3}。议事报告将记录所有共识、分歧和待调研问题，供决策参考。'],
+    bottomLines: ['必须在法律框架内', '方案必须有可操作性', '不能让任何一方的合理诉求被忽视'],
+  },
+  '间接影响者': {
+    label:'间接影响者', speakingTraits:{ tone:'直接、务实，聚焦被忽视的实操成本', strategy:'把隐性成本显性化，要求利益不因别人决定而受损', negotiationStyle:'不反对任何方案，但要求解决由此产生的额外成本' },
+    openers: ['前面几位谈得都很好，但有一个问题始终被忽略：{hidden_cost}。我是{name}，{interest0}。{evidence_ref}。', '各位都在讨论{surface_topic}，但很少有人问：{cost_question}。我是{name}，我想把这个问题摆到桌面上。'],
+    responders: ['{reply_to}的方案听上去不错。{ack_brief}。但我必须追问：{cost_question}。{evidence_ref}。', '我听到了{reply_to}的建议。{ack_brief}。我补充一个数据点：{evidence_ref}。所以我的建议是：{practical_proposal}。'],
+    closers: ['我还是那个诉求：{bottom_line}。这不是在刁难任何一方，而是{justification}。'],
+    bottomLines: ['治理成本必须有明确的资金来源', '不能把额外成本转嫁到一线人员身上', '方案要有配套的经费保障'],
+  },
+  '专业观察者': {
+    label:'专业观察者', speakingTraits:{ tone:'冷静、建设性，引入专业框架和外部案例', strategy:'跳出二元对立，用数据和案例提供第三条路', negotiationStyle:'设计方案框架，推动试点思维和数据驱动决策' },
+    openers: ['谢谢前面各位的发言。作为{name}，我想从一个稍微不同的角度来思考{topic}。{evidence_ref}。我建议我们跳出{false_dichotomy}的框架。', '大家讨论很热烈，但目前的讨论有点陷入了{frame_trap}。{evidence_ref}。我的建议是：{proposal_framework}。'],
+    responders: ['{reply_to}的观点很实在。{ack_brief}。从专业角度我补充一点：{professional_insight}。{evidence_ref}。{design_suggestion}。', '我听到了{reply_to}的关切。{ack_brief}。这里有一个可以借鉴的做法：{case_ref}。{design_suggestion}。'],
+    closers: ['各方现在已经达成了几个关键共识。剩下几个需要真实调研的问题我整理一下：\n- {research_q1}\n- {research_q2}\n- {research_q3}\n\n这些 AI 无法替代实地调研。'],
+    bottomLines: ['必须基于数据和证据做决策', '试点方案要有明确的评估指标', 'AI议事不能替代真实的公众参与和实地调研'],
+  },
+};
+
+
+// ============================================================
+// AGENTS & SOP
+// ============================================================
+const AGENTS = [
+  { id:'a0', name:'夜市摊贩代表', role:'直接受益者', emoji:'🍜', color:'#f59e0b', bg:'#fef3c7', stance:0.8, isFacilitator:false, archetypeKey:'直接受益者',
+    interests:['保留经营机会','获得稳定摊位','避免一刀切取缔','参与规则制定'] },
+  { id:'a1', name:'周边居民代表', role:'直接受影响者', emoji:'🏠', color:'#ef4444', bg:'#fee2e2', stance:-0.7, isFacilitator:false, archetypeKey:'直接受影响者',
+    interests:['保障居住环境质量','明确闭市时间和噪声管控','建立投诉响应机制','确保消防和通行安全'] },
+  { id:'a2', name:'夜间消费者代表', role:'间接受益者', emoji:'🛍️', color:'#8b5cf6', bg:'#ede9fe', stance:0.5, isFacilitator:false, archetypeKey:'间接受益者',
+    interests:['保留便利低价消费选择','合理的营业时间','食品安全和卫生','多样化业态'] },
+  { id:'a3', name:'街道办治理人员', role:'治理方', emoji:'🏛️', color:'#3b82f6', bg:'#dbeafe', stance:0.1, isFacilitator:false, archetypeKey:'治理方',
+    interests:['减少居民投诉','维护公共秩序','落实上级政策','避免极端事件'] },
+  { id:'a4', name:'环卫人员代表', role:'间接影响者', emoji:'🧹', color:'#10b981', bg:'#d1fae5', stance:-0.3, isFacilitator:false, archetypeKey:'间接影响者',
+    interests:['获得额外清扫经费','合理配置垃圾桶和清运频次','不被转嫁治理成本','劳动条件和安全保障'] },
+  { id:'a5', name:'城市设计师', role:'专业观察者', emoji:'📐', color:'#ec4899', bg:'#fce7f3', stance:0.2, isFacilitator:false, archetypeKey:'专业观察者',
+    interests:['提出可量化可验证的试点方案','引入国内外空间治理经验','从保留vs取缔转向条件化治理','确保方案可执行可复评'] },
+  { id:'mod', name:'议事主持人', role:'流程引导', emoji:'🎤', color:'#fbbf24', bg:'#fef3c7', stance:0.0, isFacilitator:true, archetypeKey:null,
+    interests:['确保各方发言权平等','引导讨论聚焦方案设计而非立场对抗','cue流程阶段、控制发言节奏','观察发言分布调整发言机会'] },
+  { id:'rev', name:'议事评审员', role:'质量诊断', emoji:'🔍', color:'#34d399', bg:'#d1fae5', stance:0.0, isFacilitator:true, archetypeKey:null,
+    interests:['评审议事过程是否公平论证是否充分','指出逻辑漏洞证据缺失和讨论盲区','评估各利益群体的讨论质量和参与度','为议事质量改进提供具体建议'] },
 ];
+
+const SOP_PHASES = [
+  {id:'S0_topic_input', label:'S0 议题输入'},
+  {id:'S1_issue_analysis', label:'S1 冲突分析'},
+  {id:'S2_evidence', label:'S2 证据收集'},
+  {id:'S3_agent_pool', label:'S3 角色生成'},
+  {id:'S4_round_plan', label:'S4 轮次规划'},
+  {id:'S5_deliberation_plan', label:'S5 议事计划'},
+  {id:'S6_position_statement', label:'S6 立场陈述'},
+  {id:'S7_outer_observation', label:'S7 外圈观察'},
+  {id:'S8_round2', label:'S8 质询修正'},
+  {id:'S9_draft_proposal', label:'S9 工作草案'},
+  {id:'S10_review', label:'S10 方案审查'},
+  {id:'S11_vote', label:'S11 校验投票'},
+  {id:'S12_report', label:'S12 输出报告'},
+];
+
+// ============================================================
+// DELIBERATION ENGINE CORE
+// ============================================================
+
+function fillTemplate(tmpl, vars) {
+  return tmpl.replace(/\{(\w+)\}/g, (_, key) => vars[key] !== undefined ? vars[key] : `{${key}}`);
+}
+
+function pickEvidence(archetypeKey) {
+  if (!archetypeKey) return '';
+  const matches = EVIDENCE_DB.filter(e => e.matchArchetypes.includes(archetypeKey));
+  if (!matches.length) return '';
+  const ev = R.pick(matches);
+  return `[${ev.id}] ${ev.quote.slice(0, 80)}...`;
+}
+
+function extractKeyPoint(text) {
+  if (!text) return '之前的观点';
+  const s = text.split(/[。！？\n]/)[0];
+  return s.length > 50 ? s.slice(0, 50) + '...' : s;
+}
+
+function randomAck(currentName, prevName, prevText, type) {
+  const briefs = [`我理解${prevName}的关切`, `听到了${prevName}的声音`, `${prevName}说的有道理`, `感谢${prevName}的分享`];
+  const details = [`${prevName}提到的${extractKeyPoint(prevText)}确实值得深入讨论`, `${prevName}的分析很有价值，特别是关于具体参数的部分`, `从${currentName}的角度，${prevName}的观点让我想到另一个层面`];
+  return type === 'brief' ? R.pick(briefs) : R.pick(details);
+}
+
+function randomCritique() {
+  return R.pick(['但可能低估了实际执行的难度', '不过还需要考虑配套的监督机制', '但这个框架缺少具体的量化标准', '然而从公平性角度看还有改进空间']);
+}
+
+function genSuggestion(archetypeKey) {
+  const m = {
+    '直接受益者': ['摊位编号+公开抽签+卫生押金', '达标后进入长期经营审核通道'],
+    '直接受影响者': ['闭市时间冬22:00/夏22:30，21:30后禁高噪设备', '投诉下降50%作为达标KPI'],
+    '间接受益者': ['季节性灵活调整营业时间', '设立消费者反馈渠道'],
+    '治理方': ['网格化管理+专人监督+公示制度', '摊位费+卫生押金+环卫附加费三方共担'],
+    '间接影响者': ['环卫附加费专款专用，三方共担', '合理配置垃圾桶和清运频次'],
+    '专业观察者': ['四周试点+量化KPI+第三方评估', '划定摊位线、通行线、消防缓冲线'],
+  };
+  return R.pick(m[archetypeKey] || ['兼顾各方利益的具体方案']);
+}
+
+function buildContext(agent, topicAnalysis, prevSpeaker) {
+  const ac = ARCHETYPE_CONFIGS[agent.archetypeKey] || {};
+  const interests = agent.interests || [];
+  const bottomLines = (ac.bottomLines) || ['合理诉求应被尊重'];
+  const ent = topicAnalysis.entities || {};
+  const prevName = prevSpeaker ? prevSpeaker.name : '';
+  const prevText = prevSpeaker ? (prevSpeaker.lastText || '') : '';
+
+  return {
+    name: agent.name,
+    topic: topicAnalysis.question || topicAnalysis.context || '',
+    g1: ent.group1 || '摊贩', g2: ent.group2 || '居民', g3: ent.group3 || '消费者',
+    interest0: interests[0] || '', interest1: interests[1] || '',
+    reply_to: prevName,
+    mention_point: extractKeyPoint(prevText),
+    ack_brief: prevSpeaker ? randomAck(agent.name, prevName, prevText, 'brief') : '感谢之前的发言',
+    ack_detail: prevSpeaker ? randomAck(agent.name, prevName, prevText, 'detail') : '前面的讨论很有启发性',
+    bridge_to_own: '但我们也需要关注自身的核心诉求',
+    evidence_ref: pickEvidence(agent.archetypeKey),
+    proposal: genSuggestion(agent.archetypeKey),
+    flexible_proposal: '根据实际情况灵活调整的方案',
+    demand: bottomLines[0] || '核心诉求必须被满足',
+    critique: prevSpeaker && agent.stance * (prevSpeaker.stance || 0) < 0 ? randomCritique() : '',
+    bottom_line: R.pick(bottomLines),
+    consequence: '大量家庭失去收入来源，社区经济活力下降',
+    concession: '接受在规定时间和区域内经营',
+    condition: '获得稳定的经营预期和公平的规则',
+    hidden_cost: '环卫和噪声治理的额外成本由谁来承担',
+    cost_question: '这笔额外费用谁来出、怎么出',
+    surface_topic: topicAnalysis.question || '这个议题',
+    false_dichotomy: '"保留 vs 取缔"的二元对立',
+    frame_trap: '"支持还是反对"的立场之争',
+    professional_insight: '国内外案例表明条件化治理是可行路径',
+    case_ref: '杭州某夜市的"摊位积分制"实现自治管理，投诉率下降62%',
+    design_suggestion: '采用试点方式，用四周数据驱动决策',
+    proposal_framework: '条件化治理框架——在明确条件和KPI的前提下允许经营',
+    policy_ref: topicAnalysis.policyRef || '相关法规政策',
+    bridge_solution: '在法规框架内寻找兼顾各方利益的可行方案',
+    concrete_proposal: '制定含具体KPI和监督机制的试点方案',
+    framework_proposal: '建立条件化治理框架，从立场之争转向条件设计',
+    justification: '这是公平性的基本要求，不针对任何一方',
+    practical_proposal: '建立透明的成本分摊和监督机制',
+    consensus1: '采用试点而非一刀切的方式', consensus2: '建立量化KPI和评估机制', consensus3: '保障各方基本权益不被忽视',
+    research_q1: '实地测算环卫增额成本', research_q2: '开展居民满意度基线调查', research_q3: '收集周边社区治理案例的对比数据',
+    consumer_perspective: '消费者也在乎便利和实惠，同时理解居民的合理诉求',
+  };
+}
+
+// ── Speech composers ────────────────────────────────────────
+
+function composeAgentSpeech(agent, topic, topicAnalysis, dialogueHistory, phase) {
+  const ac = ARCHETYPE_CONFIGS[agent.archetypeKey];
+  if (!ac) return '我暂时没有补充，请其他代表继续发言。';
+
+  const lastMsg = dialogueHistory.length > 0 ? dialogueHistory[dialogueHistory.length - 1] : null;
+  const prevSpeaker = lastMsg ? AGENTS.find(a => a.id === lastMsg.agent_id) : null;
+  const ctx = buildContext(agent, topicAnalysis, prevSpeaker ? { name: prevSpeaker.name, lastText: lastMsg.text, stance: prevSpeaker.stance } : null);
+
+  let template;
+  if (phase === 'opening') {
+    template = R.pick(ac.openers);
+  } else if (phase === 'closing') {
+    template = R.pick(ac.closers);
+  } else {
+    template = R.pick(ac.responders);
+  }
+
+  return fillTemplate(template, ctx);
+}
+
+function composeHostSpeech(phase, roundNo, context) {
+  const inner = context.innerCircle || [];
+  const outer = context.outerCircle || [];
+  const innerNames = inner.map(a => a.name).join('、');
+  const outerNames = outer.map(a => a.name).join('、');
+
+  const templates = {
+    round_open: [
+      `各位代表，欢迎来到第${roundNo}轮鱼缸讨论。本轮内圈为${innerNames}四位代表，${outerNames}在外圈观察。\n\n请内圈代表围绕核心关切依次发言，发言时请回应前一位发言者的观点。`,
+      `第${roundNo}轮讨论开始。内圈参与者：${innerNames}。外圈观察者：${outerNames}。\n\n请内圈各位依次表达观点，注意回应前面发言者的核心论述。`,
+    ],
+    round_mid: [
+      `感谢各位的发言。我注意到目前讨论在几个关键参数上还存在不同看法。请大家从立场表达转向条件设计——在什么具体条件下可以接受？什么条件下不能接受？`,
+      `讨论很热烈，各方立场已经比较清晰了。现在请聚焦到可量化的参数上：时间、费用、监督机制。让我们把讨论推向可操作的层面。`,
+    ],
+    round_close: [
+      `本轮各方核心立场已充分表达。我观察到几个共识方向正在形成，同时有几个具体分歧需要后续深入。\n\n下面请评审员就本轮议事过程给出观察意见。`,
+      `第${roundNo}轮讨论告一段落。各方在条件化治理框架下达成了多项初步共识。接下来请评审员评估本轮议事质量。`,
+    ],
+    deliberation_close: [
+      `感谢各方今天真诚而富有建设性的讨论。我们从立场表达走到了具体参数协商，形成了可操作的试点方案框架。\n\n议事报告将记录所有共识、分歧和待调研问题，作为决策参考的重要依据。本次议事到此结束，感谢各位的参与！`,
+    ],
+  };
+
+  return R.pick(templates[phase] || ['请继续讨论。']);
+}
+
+function composeReviewerSpeech(phase, roundNo, context) {
+  const speakCounts = context.agentSpeakCounts || {};
+  const dialogueHistory = context.dialogueHistory || [];
+  const innerCircle = context.innerCircle || [];
+
+  if (phase === 'round_review') {
+    const entries = Object.entries(speakCounts).filter(([id]) => !['mod','rev'].includes(id));
+    entries.sort((a, b) => b[1] - a[1]);
+    const top = entries.slice(0, 2).map(([id, n]) => {
+      const a = AGENTS.find(x => x.id === id);
+      return a ? `${a.name}(${n}次)` : `${id}(${n}次)`;
+    }).join('、');
+    const bottom = entries.slice(-2).map(([id, n]) => {
+      const a = AGENTS.find(x => x.id === id);
+      return a ? `${a.name}(${n}次)` : `${id}(${n}次)`;
+    }).join('、');
+
+    return R.pick([
+      `【第${roundNo}轮评审观察】\n\n1. 发言均衡性：本轮内圈各代表获得了表达机会。发言较多：${top || '分布较均'}。${bottom ? '发言偏少：' + bottom + '，建议下轮给予更多发言时间。' : ''}\n\n2. 论证质量：讨论从立场表达逐步转向具体参数协商，有实质性进展。建议后续发言更多地引用证据卡片中的具体数据来支撑论证。\n\n3. 证据使用：部分发言引用了证据编号，这是好的实践。建议各方更系统地标注证据来源，增强论证的可追溯性。\n\n💡 建议：下一轮优先安排本轮外圈成员进入内圈，确保各群体都有平等的内圈发言机会。`,
+      `【第${roundNo}轮评审观察】\n\n一、发言分布：本轮共${dialogueHistory.length}条发言。${top ? '发言较多：' + top : ''}\n\n二、讨论质量：各方在具体条款上的协商具有建设性，"条件化治理"框架有效引导了讨论从二元对立转向方案设计。\n\n三、待改进：部分关键分歧（如费用标准、退出触发条件）讨论深度仍不足，建议下轮重点突破。\n\n💡 建议：引入更多量化数据支撑论证，减少纯立场性陈述。`,
+    ]);
+  }
+
+  if (phase === 'final_review') {
+    return `【议事全过程质量评估】\n\n一、过程公平性：鱼缸轮换机制确保了各方均有内圈发言机会，主持人有效引导了发言节奏。整体发言分布基本均衡。\n\n二、论证质量：讨论从二元立场对立成功转向了条件化治理框架，各方在具体参数上达成了多项共识。论证充分性达到预期水平。\n\n三、证据使用：部分关键证据（E-NM-002投诉数据、E-NM-005政策依据、E-NM-012案例）被有效引用。但环卫成本（E-NM-008）和摊位费标准方面仍需实地数据补充。\n\n四、各群体参与度评估：\n• 摊贩：发言充分，从防守转向建设性提案\n• 居民：持续聚焦量化标准，立场明确且有数据支撑\n• 消费者：视角独特，补充了易被忽视的消费需求\n• 街道办：提出了可执行的网格化监督方案\n• 环卫：隐性成本关切得到表达和重视\n• 设计师：框架引导作用显著，推动讨论结构化\n\n五、遗留问题：\n1. 环卫附加费具体金额需实地测算\n2. 方案缺乏交通流量和居民满意度基线数据\n3. AI议事成果可作为决策参考，但最终执行仍需实地数据支撑\n\n总体评价：议事过程有序、论证有据、协商有建设性，达到了AI辅助决策支持的设计目标。`;
+  }
+
+  return '议事过程总体有序，各方均有表达机会。';
+}
+
+// ── Fishbowl rotation ───────────────────────────────────────
+
+function selectInnerCircle(roundNo) {
+  const stakeholders = AGENTS.filter(a => !a.isFacilitator);
+  if (roundNo === 1) {
+    return {
+      inner: stakeholders.filter(a => ['a0','a1','a4','a5'].includes(a.id)),
+      outer: stakeholders.filter(a => ['a2','a3'].includes(a.id)),
+    };
+  }
+  return {
+    inner: stakeholders.filter(a => ['a2','a3','a0','a1'].includes(a.id)),
+    outer: stakeholders.filter(a => ['a4','a5'].includes(a.id)),
+  };
+}
+
+// ── Speaker selection ───────────────────────────────────────
+
+function selectNextSpeaker(innerCircle, spoken) {
+  const unspoken = innerCircle.filter(a => !spoken.includes(a.id));
+  if (unspoken.length === 0) return R.pick(innerCircle);
+  if (spoken.length === 0) {
+    const starter = unspoken.find(a => a.id === 'a5') || unspoken[0];
+    return starter;
+  }
+  const lastId = spoken[spoken.length - 1];
+  const last = AGENTS.find(a => a.id === lastId);
+  if (last && last.stance > 0.3) {
+    const con = unspoken.find(a => a.stance < -0.2);
+    if (con) return con;
+  }
+  if (last && last.stance < -0.2) {
+    const pro = unspoken.find(a => a.stance > 0.3);
+    if (pro) return pro;
+  }
+  return unspoken[0];
+}
+
+// ── Artifact generators ─────────────────────────────────────
+
+function generateRoundSummary(roundNo, innerCircle, roundDialogue) {
+  const roles = innerCircle.map(a => a.role);
+  return {
+    round_no: roundNo,
+    majority_views: [
+      `[${roles[0] || '参与方'}] 表达了核心诉求并提出了建设性方案建议`,
+      '各方在条件化治理框架下进行了具体参数协商',
+    ],
+    minority_views: [
+      '部分群体对具体执行参数（时间、费用）有保留意见',
+    ],
+    unresolved_conflicts: roundNo === 1 ? [
+      '营业稳定性 vs 退出机制的具体触发条件',
+      '环卫附加费的金额和分摊比例',
+    ] : [
+      '夏季闭市时间存在30分钟分歧',
+      '摊位费标准缺乏可比案例数据',
+    ],
+    evidence_gaps: [
+      '环卫增额成本缺乏实地测算数据',
+      '居民满意度基线数据缺失',
+    ],
+    next_round_questions: roundNo === 1 ? [
+      '如何设计"达标转长期"的量化标准？',
+      '环卫附加费的具体金额如何测算？',
+    ] : [
+      '试点方案如何确保数据公正性？',
+      '长期经营机制的触发条件是什么？',
+    ],
+    involved_groups: roles,
+  };
+}
+
+function generateConflictMatrix() {
+  return {
+    axes: [
+      { name:'经济生存权 vs 居住环境权', parties:['摊贩','居民'], intensity:'high', description:'摊贩依赖夜市收入，居民受噪声油烟直接影响', resolution_status:'partially_resolved' },
+      { name:'消费便利 vs 噪声管控', parties:['消费者','居民'], intensity:'medium', description:'闭市时间基本达成共识，夏季存在30分钟分歧', resolution_status:'partially_resolved' },
+      { name:'治理成本分摊', parties:['环卫','摊贩','街道办'], intensity:'medium', description:'环卫附加费金额和分摊比例未确定', resolution_status:'open' },
+    ],
+    hidden_conflicts: ['周边非投诉老年居民的实际需求未被调查', '外来务工租房者的消费偏好未被代表'],
+    pseudo_consensus_flags: ['各方同意"试点"，但对试点后路径的分歧可能被低估'],
+  };
+}
+
+function generateProposal(topicAnalysis) {
+  const venue = (topicAnalysis.entities && topicAnalysis.entities.venue) || '社区公共空间';
+  return {
+    proposal_id: 'prop_0001',
+    version: 1,
+    title: `关于${venue}的试点治理方案`,
+    content: `基于两轮鱼缸讨论结果，提出以下试点治理方案：\n\n## 核心原则\n试点而非一刀切，用四周数据驱动决策。\n\n## 具体措施\n1. 划定摊位线、通行线和消防缓冲线\n2. 摊位编号+公示，每个摊位负责自清垃圾并缴纳卫生押金\n3. 闭市时间：冬季22:00 / 夏季22:30，21:30后禁止高噪声设备\n4. 设立环卫附加费，摊位费中单列，专款专用（具体金额实地测算后公示）\n5. 制定KPI体系：夜间投诉下降50%↑（参考E-NM-002基线）、环卫评分C级↑（参考E-NM-008）、消防通道无占用\n6. 建立快速投诉小程序，基于现有网格化系统\n7. 连续两周不达标触发整改，连续一个月不达标重新评估\n\n## 少数意见保留\n- 环卫人员的经费专款专用诉求已纳入方案\n- 消费者的季节性调整建议已采纳\n- 摊贩的摊位稳定性诉求体现在"达标转长期"条款中\n\n## 待实地调研\n- 环卫增额成本测算\n- 摊位费标准调研（周边夜市对比）\n- 交通流量基线数据收集`,
+    responsible: '街道办治理人员',
+    timeline: '试点启动后4周（前期准备1周）',
+    resources: '网格巡查人力、地面标线材料、垃圾桶增配、小程序开发',
+    risks: '环卫附加费具体金额需实地测算后确定；摊位分配公平性需要持续监督机制',
+    evaluation_criteria: ['夜间投诉量下降50%以上', '环卫评分不低于C级', '消防通道无占用记录', '连续两周不达标触发整改'],
+    status: 'draft',
+  };
+}
+
+function validateProposal() {
+  return {
+    passed: false,
+    hard_constraint_errors: [],
+    evidence_errors: ['方案引用数据（投诉下降50%、环卫评分C级）需标注具体证据来源'],
+    fairness_risks: ['环卫人员的经费专款专用诉求虽被提及但未给出具体金额保障'],
+    conflict_errors: [],
+    feasibility_errors: ['环卫附加费的具体金额和分摊比例未明确', '摊位分配的公平性监督机制未具体设计'],
+    consistency_errors: [],
+    revision_instructions: ['[证据] 方案引用数据需标注具体证据来源', '[公平性] 环卫人员经费诉求需具体金额保障', '[可执行性] 环卫附加费金额和分摊比例需明确'],
+  };
+}
+
+// ── Main deliberation generator ─────────────────────────────
+
+async function* runDeliberation(topic) {
+  const topicAnalysis = analyzeTopic(topic);
+  const speakCounts = {};
+  AGENTS.forEach(a => { speakCounts[a.id] = 0; });
+
+  const allDialogue = [];
+  const roundSummaries = [];
+
+  // Phase: issue_analysis → evidence_collection → stakeholder_mapping
+  yield { type: 'sop_phase', phase: 'issue_analysis' };
+  yield { type: 'delay', ms: 350 };
+  yield { type: 'sop_phase', phase: 'evidence_collection' };
+  yield { type: 'delay', ms: 350 };
+  yield { type: 'sop_phase', phase: 'stakeholder_mapping' };
+  yield { type: 'delay', ms: 350 };
+
+  for (let roundNo = 1; roundNo <= 2; roundNo++) {
+    const { inner, outer } = selectInnerCircle(roundNo);
+    const spoken = [];
+
+    yield { type: 'sop_phase', phase: 'fishbowl_discussion' };
+    yield { type: 'fishbowl_update', inner, outer, roundNo };
+    yield { type: 'round_divider', roundNo, inner };
+
+    // Host opens round
+    const host = AGENTS.find(a => a.id === 'mod');
+    let text = composeHostSpeech('round_open', roundNo, { innerCircle: inner, outerCircle: outer });
+    yield { type: 'speech', agent: host, text, roundNo, isFacilitator: true };
+    speakCounts['mod']++;
+    allDialogue.push({ agent_id: 'mod', text, round_no: roundNo, isFacilitator: true });
+
+    // 4 inner circle speeches
+    for (let s = 0; s < 4; s++) {
+      const speaker = selectNextSpeaker(inner, spoken);
+      if (!speaker) break;
+      spoken.push(speaker.id);
+
+      const phase = s === 0 ? 'opening' : 'responding';
+      text = composeAgentSpeech(speaker, topic, topicAnalysis, allDialogue, phase);
+
+      yield { type: 'speech', agent: speaker, text, roundNo };
+      speakCounts[speaker.id] = (speakCounts[speaker.id] || 0) + 1;
+      allDialogue.push({ agent_id: speaker.id, text, round_no: roundNo });
+
+      // Host mid-round intervention after 2nd speech
+      if (s === 1) {
+        text = composeHostSpeech('round_mid', roundNo, { innerCircle: inner, outerCircle: outer });
+        yield { type: 'speech', agent: host, text, roundNo, isFacilitator: true };
+        speakCounts['mod']++;
+        allDialogue.push({ agent_id: 'mod', text, round_no: roundNo, isFacilitator: true });
+      }
+    }
+
+    // Host closes round
+    text = composeHostSpeech('round_close', roundNo, { innerCircle: inner, outerCircle: outer });
+    yield { type: 'speech', agent: host, text, roundNo, isFacilitator: true };
+    speakCounts['mod']++;
+    allDialogue.push({ agent_id: 'mod', text, round_no: roundNo, isFacilitator: true });
+
+    // Reviewer evaluation
+    const reviewer = AGENTS.find(a => a.id === 'rev');
+    text = composeReviewerSpeech('round_review', roundNo, {
+      innerCircle: inner, dialogueHistory: allDialogue.filter(d => d.round_no === roundNo), agentSpeakCounts: speakCounts
+    });
+    yield { type: 'speech', agent: reviewer, text, roundNo, isFacilitator: true };
+    speakCounts['rev']++;
+    allDialogue.push({ agent_id: 'rev', text, round_no: roundNo, isFacilitator: true });
+
+    // Round summary
+    const summary = generateRoundSummary(roundNo, inner, allDialogue.filter(d => d.round_no === roundNo));
+    roundSummaries.push(summary);
+    yield { type: 'round_summary', summary, roundNo };
+  }
+
+  // Final artifacts
+  yield { type: 'sop_phase', phase: 'conflict_review' };
+  const conflict = generateConflictMatrix();
+  yield { type: 'conflict_review', conflict };
+
+  yield { type: 'sop_phase', phase: 'proposal_generation' };
+  const proposal = generateProposal(topicAnalysis);
+  yield { type: 'proposal', proposal };
+
+  yield { type: 'sop_phase', phase: 'validation' };
+  const validation = validateProposal();
+  yield { type: 'validation', validation };
+
+  yield { type: 'sop_phase', phase: 'final_report' };
+
+  // Final reviewer evaluation
+  const reviewer = AGENTS.find(a => a.id === 'rev');
+  let ftext = composeReviewerSpeech('final_review', 2, { dialogueHistory: allDialogue, agentSpeakCounts: speakCounts });
+  yield { type: 'speech', agent: reviewer, text: ftext, isFacilitator: true };
+  allDialogue.push({ agent_id: 'rev', text: ftext, isFacilitator: true });
+
+  // Host closing
+  const host2 = AGENTS.find(a => a.id === 'mod');
+  ftext = composeHostSpeech('deliberation_close', 2, {});
+  yield { type: 'speech', agent: host2, text: ftext, isFacilitator: true };
+  allDialogue.push({ agent_id: 'mod', text: ftext, isFacilitator: true });
+
+  yield { type: 'complete', dialogue: allDialogue, summaries: roundSummaries, conflict, proposal, validation, speakCounts };
+}
 
 // ============================================================
 // STATE
 // ============================================================
-let turns = [];
-let currentTurnIdx = -1;
 let running = false;
 let timer = null;
-let agentEls = {};
-let bubbles = {};
+let collectedData = { agents:[], fishbowl:[], dialogue:[], summaries:[], conflict:null, proposal:null, review:null, validation:null, currentRound:0, speakCounts:{}, deliberationPlans:[], outerObservations:[], observerSnapshots:[], gateResults:[], reviewCards:[], executiveSummary:'', recommendations:[] };
 
 // ============================================================
-// INIT - called when user clicks "进入议事厅"
+// UI: SOP BAR
+// ============================================================
+function renderSopBar() {
+  const bar = document.getElementById('sopBar');
+  bar.innerHTML = SOP_PHASES.map((p, i) => {
+    const conn = i > 0 ? '<span class="sop-conn"></span>' : '';
+    return `${conn}<span class="sop-step" id="sop-${p.id}"><span class="dot"></span>${p.label}</span>`;
+  }).join('');
+}
+
+function updateSopPhase(phaseId) {
+  const phases = SOP_PHASES.map(p => p.id);
+  const idx = phases.indexOf(phaseId);
+  phases.forEach((pid, i) => {
+    const el = document.getElementById(`sop-${pid}`);
+    if (!el) return;
+    el.classList.remove('active', 'done');
+    if (i < idx) el.classList.add('done');
+    if (i === idx) el.classList.add('active');
+  });
+}
+
+// ============================================================
+// UI: INIT
 // ============================================================
 function initApp() {
   const topic = document.getElementById('topicInput').value.trim();
   if (!topic) return;
 
-  // Hide overlay
   document.getElementById('startOverlay').classList.add('hidden');
   document.getElementById('topicDisplay').textContent = topic;
-  document.getElementById('statusBadge').textContent = '? 就绪 | simulation';
+  document.getElementById('statusBadge').textContent = '⏳ 就绪';
   document.getElementById('statusBadge').className = 'status-badge idle';
-
-  // Enable start button
   document.getElementById('btnStart').disabled = false;
   document.getElementById('btnReport').disabled = true;
+  var fa = document.getElementById('facilitatorAvatars'); if (fa) fa.style.display = 'flex';
 
-  // Reset state
-  turns = [];
-  currentTurnIdx = -1;
   running = false;
+  collectedData = { agents: AGENTS, fishbowl:[], dialogue:[], summaries:[], conflict:null, proposal:null, validation:null, currentRound:0, speakCounts:{}, deliberationPlans:[], outerObservations:[], observerSnapshots:[], gateResults:[], reviewCards:[] };
 
-  // Render
-  renderCharacters();
-  renderSpeakerBars();
-  resetMetrics();
-  updateProgress();
-  document.getElementById('transcriptList').innerHTML =
-    '<div style="color:var(--text-dim);text-align:center;padding:40px;font-size:12px">准备就绪，点击「开始议事」</div>';
-}
+  renderSopBar();
+  renderLeftPanel();
+  document.getElementById('rightStage').innerHTML =
+    '<div style="color:var(--dim);text-align:center;padding:60px;font-size:13px"><div style="font-size:48px;margin-bottom:12px">🐟</div><div>准备就绪，点击「开始议事」</div></div>';
+  document.getElementById('centerFishbowl').innerHTML =
+    '<div class="fb-placeholder"><div class="fb-ph-emoji">🐟</div><div>鱼缸讨论框</div><div style="font-size:10px;color:var(--muted);margin-top:4px">内圈参与者将在此显示</div></div>';
 
-function renderCharacters() {
-  const ring = document.getElementById('characterRing');
-  ring.innerHTML = '';
-  agentEls = {};
-  bubbles = {};
-
-  AGENTS.forEach((a, i) => {
-    const posClass = i < 3 ? 'top' : 'bot';
-    const div = document.createElement('div');
-    div.className = 'char dimmed';
-    div.id = `char-${a.id}`;
-    div.innerHTML = `
-      <div class="av-wrap">
-        <div class="av-glow" style="--g:${a.color}80"></div>
-        <div class="av" style="background:${a.bg};color:${a.color}">${a.emoji}</div>
-        <div class="think-dots">...</div>
-      </div>
-      <div class="cname">${a.name}</div>
-      <div class="crole">${a.role}</div>
-      <div class="bubble ${posClass}" id="bub-${a.id}">
-        <div class="bmeta"><span id="bn-${a.id}"></span><span id="bt-${a.id}"></span></div>
-        <div id="bc-${a.id}"></div>
-        <div class="evbadges" id="be-${a.id}"></div>
-      </div>
-    `;
-    ring.appendChild(div);
-    agentEls[a.id] = div;
-    bubbles[a.id] = {
-      el: div.querySelector('.bubble'),
-      name: div.querySelector(`#bn-${a.id}`),
-      turn: div.querySelector(`#bt-${a.id}`),
-      content: div.querySelector(`#bc-${a.id}`),
-      ev: div.querySelector(`#be-${a.id}`),
-    };
-  });
+  saveModeConfig();
+  updateModeHint();
 }
 
 // ============================================================
-// START DELIBERATION
+// UI: LEFT PANEL
 // ============================================================
-function startDeliberation() {
-  if (running) return;
-  running = true;
-  turns = [];
-  currentTurnIdx = -1;
-
-  document.getElementById('btnStart').disabled = true;
-  document.getElementById('btnReport').disabled = true;
-  document.getElementById('statusBadge').textContent = '? 议事进行中...';
-  document.getElementById('statusBadge').className = 'status-badge running';
-  document.getElementById('transcriptList').innerHTML = '';
-  clearAllBubbles();
-  resetMetrics();
-
-  playTurn(0);
+function renderLeftPanel() {
+  const panel = document.getElementById('leftPanel');
+  const stakeholders = AGENTS.filter(a => !a.isFacilitator);
+  panel.innerHTML = stakeholders.map(a => `
+    <div class="agent-mini" id="am-${a.id}">
+      <div class="am-hd">
+        <span class="am-emoji">${a.emoji}</span>
+        <div>
+          <div class="am-name">${a.name}</div>
+          <div class="am-role">${a.role}</div>
+        </div>
+      </div>
+      <div class="am-stats">
+        <span>💬 发言: <strong id="sc-${a.id}">0</strong>次</span>
+        <span class="am-stance stance-neutral" id="st-${a.id}">待定</span>
+      </div>
+    </div>
+  `).join('');
 }
 
-function playTurn(idx) {
-  if (idx >= TURNS.length) { finishDeliberation(); return; }
-  if (!running) return;  // Was stopped
-
-  const t = TURNS[idx];
-  const agent = AGENTS[t.a];
-
-  // Show "thinking" on the speaking agent
-  showThinking(agent.id);
-
-  timer = setTimeout(() => {
-    hideThinking();
-    addUtterance(idx, t, agent);
-    updateMetricsFromTurns();
-    updateProgress();
-    updateTranscript();
-    playTurn(idx + 1);
-  }, 600);
-}
-
-function showThinking(agentId) {
-  Object.values(agentEls).forEach(el => { el.classList.add('dimmed'); el.classList.remove('speaking','thinking'); });
-  Object.values(bubbles).forEach(b => b.el.classList.remove('show'));
-  const el = agentEls[agentId];
-  if (el) { el.classList.remove('dimmed'); el.classList.add('thinking'); }
-}
-
-function hideThinking() {
-  Object.values(agentEls).forEach(el => el.classList.remove('thinking'));
-}
-
-function addUtterance(idx, t, agent) {
-  turns.push({
-    turn: idx + 1,
-    speaker_name: agent.name,
-    speaker_id: agent.id,
-    speaker_emoji: agent.emoji,
-    speaker_color: agent.color,
-    content: t.c,
-    stance_score: t.s,
-    reply_to: t.r,
-    evidence_ids: t.e,
-  });
-  currentTurnIdx = idx;
-
-  // Highlight speaker
-  Object.values(agentEls).forEach(el => { el.classList.add('dimmed'); el.classList.remove('speaking'); });
-  Object.values(bubbles).forEach(b => b.el.classList.remove('show'));
-
-  const el = agentEls[agent.id];
-  const b = bubbles[agent.id];
-  if (el && b) {
-    el.classList.remove('dimmed');
-    el.classList.add('speaking');
-    b.name.textContent = agent.name;
-    b.turn.textContent = `第 ${idx + 1} 轮`;
-    b.content.textContent = t.c;
-    b.ev.innerHTML = (t.e || []).map(e => `<span class="evbadge">? ${e}</span>`).join('');
-    b.el.classList.add('show');
+function updateAgentInLeft(agentId, stance, speakCount) {
+  const agent = AGENTS.find(a => a.id === agentId);
+  if (!agent || agent.isFacilitator) return;
+  const el = document.getElementById(`am-${agentId}`);
+  if (el) { el.classList.add('speaking'); setTimeout(() => el.classList.remove('speaking'), 2500); }
+  const sc = document.getElementById(`sc-${agentId}`);
+  if (sc && speakCount !== undefined) sc.textContent = speakCount;
+  const st = document.getElementById(`st-${agentId}`);
+  if (st && stance) {
+    const labels = { support: '支持', conditional_support: '条件支持', neutral: '中立', conditional_oppose: '条件反对', oppose: '反对' };
+    st.textContent = labels[stance] || stance;
+    st.className = `am-stance stance-${stance}`;
   }
 }
 
-function clearAllBubbles() {
-  Object.values(agentEls).forEach(el => { el.classList.add('dimmed'); el.classList.remove('speaking','thinking'); });
-  Object.values(bubbles).forEach(b => b.el.classList.remove('show'));
+// ============================================================
+// UI: FISHBOWL CENTER
+// ============================================================
+function updateFishbowlCenter(inner, outer, roundNo) {
+  const fb = document.getElementById('centerFishbowl');
+  if (!fb) return;
+
+  const stanceMap = { support: '支持', conditional_support: '条件支持', neutral: '中立', conditional_oppose: '条件反对', oppose: '反对' };
+  const getStance = (a) => {
+    if (a.stance > 0.6) return 'support';
+    if (a.stance > 0.3) return 'conditional_support';
+    if (a.stance < -0.6) return 'oppose';
+    if (a.stance < -0.3) return 'conditional_oppose';
+    return 'neutral';
+  };
+
+  const renderAvatar = (a, isOuter) => `
+    <div class="fb-avatar${isOuter ? ' outer-avatar' : ''}" data-aid="${a.id}">
+      <div class="fba-emoji" style="background:${a.bg || 'rgba(255,255,255,0.05)'};border:2px solid ${a.color || 'var(--border)'}">${a.emoji}</div>
+      <div class="fba-name">${a.name}</div>
+      ${!isOuter ? `<div class="fba-role">${a.role}</div>` : ''}
+      ${!isOuter ? `<span class="fba-stance stance-${getStance(a)}">${stanceMap[getStance(a)]}</span>` : ''}
+    </div>
+  `;
+
+  fb.innerHTML = `
+    <div class="facilitator-avatars" id="facilitatorAvatars" style="display:flex">
+      <div class="fac-avatar-card" id="facCardMod">
+        <div class="fac-emoji" style="background:#fef3c7;border:2px solid #fbbf24">🎤</div>
+        <div class="fac-name">议事主持人</div>
+        <div class="fac-role">流程引导</div>
+        <span class="fac-badge fac-badge-host">主持</span>
+      </div>
+      <span class="fac-sep">×</span>
+      <div class="fac-avatar-card" id="facCardRev">
+        <div class="fac-emoji" style="background:#d1fae5;border:2px solid #34d399">🔍</div>
+        <div class="fac-name">议事评审员</div>
+        <div class="fac-role">质量诊断</div>
+        <span class="fac-badge fac-badge-rev">评审</span>
+      </div>
+    </div>
+    <div class="fishbowl-frame active">
+      <div class="fb-label">🐟 鱼缸讨论</div>
+      <div class="fb-round">第 <span>${roundNo}</span> 轮</div>
+      <div class="fishbowl-inner-avatars">
+        ${(inner || []).map(a => renderAvatar(a, false)).join('')}
+      </div>
+    </div>
+    ${(outer || []).length ? `
+    <div class="fishbowl-outer-section">
+      <div class="fbo-label">— 外圈观察者 —</div>
+      <div class="fishbowl-outer-avatars">
+        ${(outer || []).map(a => renderAvatar(a, true)).join('')}
+      </div>
+    </div>` : ''}
+  `;
+
+  (inner || []).forEach(a => {
+    const el = document.getElementById(`am-${a.id}`);
+    if (el) { el.classList.add('inner'); el.classList.remove('outer'); }
+  });
+  (outer || []).forEach(a => {
+    const el = document.getElementById(`am-${a.id}`);
+    if (el) { el.classList.remove('inner'); el.classList.add('outer'); }
+  });
+}
+
+// ============================================================
+// UI: RENDER HELPERS
+// ============================================================
+function addToStage(el, title) {
+  const stage = document.getElementById('rightStage');
+  if (title) {
+    const hdr = document.createElement('div');
+    hdr.className = 'section-title';
+    hdr.textContent = title;
+    stage.appendChild(hdr);
+  }
+  stage.appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderSpeechBubble(container, agent, text, isFacilitator) {
+  const extraClass = agent.id === 'mod' ? 'facilitator' : (agent.id === 'rev' ? 'reviewer-msg' : '');
+  const textWithMentions = text.replace(
+    /@(摊贩|居民|消费者|街道办|环卫|设计师|主持人|评审员)/g,
+    '<span class="mention">@$1</span>'
+  );
+  const el = document.createElement('div');
+  el.className = `chat-msg speaking ${extraClass}`;
+  el.innerHTML = `
+    <div class="cm-avatar" style="background:${agent.bg || 'rgba(255,255,255,0.05)'}">${agent.emoji}</div>
+    <div class="cm-body">
+      <div class="cm-meta">
+        <span class="cm-name" style="color:${agent.color}">${agent.name}</span>
+        <span class="cm-role">${agent.role}</span>
+      </div>
+      <div class="cm-text">${textWithMentions}</div>
+    </div>
+  `;
+  container.appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  setTimeout(() => el.classList.remove('speaking'), 600);
+}
+
+function highlightSpeaker(agent, isFacilitator) {
+  if (isFacilitator) {
+    const cardId = agent.id === 'mod' ? 'facCardMod' : 'facCardRev';
+    const card = document.getElementById(cardId);
+    if (card) { card.classList.add('speaking'); setTimeout(() => card.classList.remove('speaking'), 2500); }
+  } else {
+    document.querySelectorAll('.fb-avatar').forEach(el => { el.style.opacity = '0.5'; });
+    const fbA = document.querySelector(`.fb-avatar[data-aid="${agent.id}"]`);
+    if (fbA) { fbA.style.opacity = '1'; const emojiEl = fbA.querySelector('.fba-emoji'); if (emojiEl) emojiEl.style.boxShadow = '0 0 14px var(--accent)'; }
+    const am = document.getElementById(`am-${agent.id}`);
+    if (am) { am.classList.add('speaking'); setTimeout(() => am.classList.remove('speaking'), 2500); }
+  }
+}
+
+function renderRoundSummaryCard(summary) {
+  const el = document.createElement('div');
+  el.className = 'round-summary';
+  el.innerHTML = `
+    <div class="rs-hd">📋 第 ${summary.round_no} 轮摘要</div>
+    <div class="rs-section"><span class="rs-label">多数意见</span>
+      ${summary.majority_views.map(v => `<div class="rs-item rs-major">· ${v}</div>`).join('')}
+    </div>
+    <div class="rs-section"><span class="rs-label">少数意见（保留）</span>
+      ${summary.minority_views.map(v => `<div class="rs-item rs-minor">· ${v}</div>`).join('')}
+    </div>
+    <div class="rs-section"><span class="rs-label">未解决冲突</span>
+      ${summary.unresolved_conflicts.map(v => `<div class="rs-item" style="color:var(--err)">⚠️ ${v}</div>`).join('')}
+    </div>
+    <div class="rs-section"><span class="rs-label">证据缺口</span>
+      ${summary.evidence_gaps.map(v => `<div class="rs-item">🔍 ${v}</div>`).join('')}
+    </div>
+    <div style="font-size:9px;color:var(--muted);margin-top:4px">涉及群体：${summary.involved_groups.join('、')}</div>
+  `;
+  addToStage(el);
+}
+
+function renderConflictMatrix(conflict) {
+  const el = document.createElement('div');
+  el.className = 'conflict-matrix';
+  el.innerHTML = `
+    <div class="cm-hd">⚡ 冲突矩阵</div>
+    ${conflict.axes.map(ax => `
+      <div class="conflict-axis">
+        <span class="ca-name">${ax.name}</span>
+        <span class="ca-parties">${ax.parties.join(' vs ')}</span>
+        <span class="ca-intensity ca-${ax.intensity}">${ax.intensity === 'high' ? '高' : ax.intensity === 'medium' ? '中' : '低'}</span>
+      </div>
+    `).join('')}
+    ${(conflict.hidden_conflicts || []).length ? `
+    <div style="margin-top:8px;font-size:10px">
+      <span style="color:var(--warn)">⚠️ 隐藏冲突：</span>
+      ${conflict.hidden_conflicts.map(c => `<div style="color:var(--dim);padding-left:10px">· ${c}</div>`).join('')}
+    </div>` : ''}
+  `;
+  addToStage(el);
+}
+
+function renderProposalCard(proposal) {
+  const el = document.createElement('div');
+  el.className = 'proposal-card';
+  el.id = 'proposalEl';
+  el.innerHTML = `
+    <div class="pp-badge">V1 · 初稿</div>
+    <div class="pp-title">${proposal.title}</div>
+    <div class="pp-content">${proposal.content}</div>
+    <div class="pp-meta">
+      <span><strong>责任主体：</strong>${proposal.responsible}</span>
+      <span><strong>时间线：</strong>${proposal.timeline}</span>
+      <span><strong>资源：</strong>${proposal.resources}</span>
+      <span><strong>风险：</strong>${proposal.risks}</span>
+    </div>
+    <div class="pp-criteria">
+      ${proposal.evaluation_criteria.map(c => `<span>✅ ${c}</span>`).join('')}
+    </div>
+    <div class="validation-bar" id="validationBar"></div>
+  `;
+  addToStage(el);
+}
+
+function renderValidationBar(validation) {
+  const bar = document.getElementById('validationBar');
+  if (!bar) return;
+  bar.innerHTML = `
+    <span class="v-item ${validation.hard_constraint_errors.length === 0 ? 'v-pass' : 'v-fail'}">${validation.hard_constraint_errors.length === 0 ? '✅' : '❌'} 硬约束</span>
+    <span class="v-item ${validation.evidence_errors.length === 0 ? 'v-pass' : 'v-fail'}">${validation.evidence_errors.length === 0 ? '✅' : '❌'} 证据</span>
+    <span class="v-item ${validation.fairness_risks.length === 0 ? 'v-pass' : 'v-fail'}">${validation.fairness_risks.length === 0 ? '✅' : '❌'} 公平性</span>
+    <span class="v-item ${validation.conflict_errors.length === 0 ? 'v-pass' : 'v-fail'}">${validation.conflict_errors.length === 0 ? '✅' : '❌'} 冲突</span>
+    <span class="v-item ${validation.feasibility_errors.length === 0 ? 'v-pass' : 'v-fail'}">${validation.feasibility_errors.length === 0 ? '✅' : '❌'} 可执行</span>
+    <span class="v-item ${validation.consistency_errors.length === 0 ? 'v-pass' : 'v-fail'}">${validation.consistency_errors.length === 0 ? '✅' : '❌'} 一致性</span>
+  `;
+}
+
+// ============================================================
+// SOP v1.2 RENDERERS (S5-S10)
+// ============================================================
+
+function renderDeliberationPlan(plan) {
+  const el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--accent)';
+  el.innerHTML = '<div class="rs-hd" style="color:var(--accent)">S5 议事计划 — ' + (plan.agent_name || '?') + '</div>' +
+    '<div style="font-size:10px;color:var(--dim);margin:4px 0">🎯 ' + (plan.round_goal || '') + '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;font-size:9px">' +
+    '<span style="color:var(--warn)">🚫 ' + (plan.non_negotiables || []).slice(0,2).join('；') + '</span> ' +
+    '<span style="color:var(--ok)">🤝 ' + (plan.possible_concessions || []).slice(0,2).join('；') + '</span></div>' +
+    '<div style="font-size:9px;color:var(--accent2)">❓ ' + (plan.question_to_others || '') + '</div>';
+  addToStage(el);
+}
+
+function renderOuterObservation(obs) {
+  var el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--accent2)';
+  var badge = obs.request_to_enter_inner_circle
+    ? '<span style="background:rgba(52,211,153,0.15);color:var(--ok);padding:1px 6px;border-radius:6px;font-size:9px">request-enter</span>' : '';
+  el.innerHTML = '<div class="rs-hd" style="color:var(--accent2)">S7 外圈观察 — ' + (obs.observer_name || '?') + ' ' + badge + '</div>' +
+    (obs.missed_issue ? '<div style="font-size:10px;color:var(--warn);margin:3px 0">missed: ' + obs.missed_issue + '</div>' : '') +
+    (obs.objection ? '<div style="font-size:10px;color:var(--err);margin:3px 0">objection: ' + obs.objection + '</div>' : '');
+  addToStage(el);
+}
+
+function renderObserverSnapshot(snap) {
+  var el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--ok)';
+  var shares = Object.entries(snap.speaker_share || {}).map(function(kv) { return kv[0] + ': ' + Math.round(kv[1]*100) + '%'; }).join(' | ');
+  el.innerHTML = '<div class="rs-hd" style="color:var(--ok)">S8 观察员快照 — 第' + (snap.round_id || '?') + '轮</div>' +
+    '<div style="font-size:10px;color:var(--dim);margin:4px 0">' +
+    '<div>speaker: ' + (shares || 'N/A') + '</div>' +
+    '<div>evidence-rate: ' + Math.round((snap.grounding_rate || 0) * 100) + '%</div>' +
+    '<div>minority-retention: ' + Math.round((snap.minority_retention || 0) * 100) + '%</div>' +
+    '<div>boundary-violations: ' + (snap.role_boundary_violations || 0) + '</div></div>' +
+    ((snap.anomaly_flags || []).length ? '<div style="font-size:9px;color:var(--warn)">flags: ' + snap.anomaly_flags.join('; ') + '</div>' : '');
+  addToStage(el);
+}
+
+function renderGateResult(gate) {
+  var sc = gate.status === 'pass' ? 'var(--ok)' : gate.status === 'reject' ? 'var(--err)' : 'var(--warn)';
+  var si = gate.status === 'pass' ? 'PASS' : gate.status === 'reject' ? 'REJECT' : 'REVISE';
+  var el = document.createElement('div');
+  el.style.cssText = 'padding:6px 12px;margin:3px 0;border-radius:6px;font-size:10px;background:rgba(255,255,255,0.03);border-left:3px solid ' + sc;
+  el.innerHTML = '<strong>' + si + ' ' + (gate.gate_name || 'Gate') + '</strong>' +
+    ((gate.issues || []).length ? '<div style="color:var(--dim);margin:2px 0">' + gate.issues.map(function(i){return '&middot; ' + i;}).join('<br>') + '</div>' : '') +
+    ((gate.required_action || []).length ? '<div style="color:var(--accent);font-size:9px">action: ' + gate.required_action.join('; ') + '</div>' : '');
+  addToStage(el);
+}
+
+function renderConflictMatrixCard(event) {
+  var el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--warn)';
+  var axes = event.axes || [];
+  var html = '<div class="rs-hd" style="color:var(--warn)">⚡ S9 冲突矩阵</div>';
+  if (axes.length === 0) {
+    html += '<div style="font-size:10px;color:var(--dim)">未检测到显著冲突轴</div>';
+  } else {
+    axes.forEach(function(ax) {
+      var intensityEmoji = ax.intensity === 'high' ? '🔴' : ax.intensity === 'medium' ? '🟡' : '🟢';
+      html += '<div style="margin:4px 0;font-size:10px"><span style="font-weight:600">' + intensityEmoji + ' ' + ax.name + '</span> — ' + (ax.parties || []).join(' vs ') + '</div>';
+      if (ax.description) html += '<div style="font-size:9px;color:var(--dim);margin-left:12px">' + ax.description + '</div>';
+    });
+  }
+  el.innerHTML = html;
+  addToStage(el);
+}
+
+function renderReviewCard(event) {
+  var el = document.createElement('div');
+  el.className = 'round-summary';
+  var statusColor = event.recommendation === 'pass' ? 'var(--ok)' : event.recommendation === 'reject' ? 'var(--err)' : 'var(--warn)';
+  el.style.borderLeft = '3px solid ' + statusColor;
+  var html = '<div class="rs-hd" style="color:' + statusColor + '">🔍 S10 方案审查 — ' + (event.recommendation || '?').toUpperCase() + '</div>';
+  if (event.detail) html += '<div style="font-size:10px;color:var(--text);margin:4px 0;line-height:1.5">' + event.detail + '</div>';
+  var scores = event.public_resource_scores || {};
+  if (Object.keys(scores).length > 0) {
+    html += '<div style="display:flex;gap:8px;margin:4px 0;font-size:9px">';
+    for (var k in scores) html += '<span style="background:var(--card);padding:2px 6px;border-radius:4px">' + k + ': ' + scores[k] + '/5</span>';
+    html += '</div>';
+  }
+  var issues = event.required_revisions || [];
+  if (issues.length > 0) {
+    html += '<div style="margin-top:4px;font-size:9px;color:var(--dim)"><strong>发现的问题：</strong>' + issues.map(function(i){return '<div style="margin:2px 0 2px 8px">· ' + i + '</div>';}).join('') + '</div>';
+  }
+  el.innerHTML = html;
+  addToStage(el, 'S10 方案审查');
+}
+
+function renderExecutiveSummary(event) {
+  var el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--ok)';
+  var html = '<div class="rs-hd" style="color:var(--ok)">📋 S12 执行摘要</div>';
+  if (event.executive_summary) html += '<div style="font-size:10px;color:var(--text);line-height:1.6;margin:4px 0">' + event.executive_summary + '</div>';
+  var recs = event.recommendations || [];
+  if (recs.length > 0) {
+    html += '<div style="margin-top:6px;font-size:10px"><strong style="color:var(--accent)">行动建议：</strong>' + recs.map(function(r, i){return '<div style="margin:2px 0 2px 8px;color:var(--dim)">' + (i+1) + '. ' + r + '</div>';}).join('') + '</div>';
+  }
+  el.innerHTML = html;
+  addToStage(el, 'S12 输出报告');
+}
+
+// ============================================================
+// UI: DELIBERATION DRIVER
+// ============================================================
+async function startDeliberation() {
+  if (running) return;
+  running = true;
+
+  const topic = document.getElementById('topicDisplay').textContent;
+
+  collectedData = { agents:[], fishbowl:[], dialogue:[], summaries:[], conflict:null, proposal:null, review:null, validation:null, currentRound:0, speakCounts:{}, deliberationPlans:[], outerObservations:[], observerSnapshots:[], gateResults:[], reviewCards:[], executiveSummary:'', recommendations:[] };
+
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnReport').disabled = true;
+  document.getElementById('rightStage').innerHTML = '';
+  var fa = document.getElementById('facilitatorAvatars'); if (fa) fa.style.display = 'flex';
+
+  renderSopBar();
+  renderLeftPanel();
+
+  AGENTS.filter(a => !a.isFacilitator).forEach(a => {
+    const sc = document.getElementById(`sc-${a.id}`);
+    if (sc) sc.textContent = '0';
+    const stEl = document.getElementById(`st-${a.id}`);
+    if (stEl) { stEl.textContent = '待定'; stEl.className = 'am-stance stance-neutral'; }
+  });
+
+  // Choose API or embedded engine based on API key availability
+  if (hasApiKeys()) {
+    // Step 1: Validate API keys BEFORE starting
+    const statusBadge = document.getElementById('statusBadge');
+    statusBadge.textContent = '⏳ 正在验证 API Key...';
+    statusBadge.className = 'status-badge running';
+
+    const mode = currentMode;
+    const quickModel = document.getElementById('quickModelSelect')?.value || 'deepseek-v4-pro';
+    const expertModels = {};
+    if (mode === 'expert') {
+      AGENTS.forEach(a => {
+        const sel = document.getElementById('expertModel_' + a.id);
+        if (sel) expertModels[a.id] = sel.value;
+      });
+    }
+    const apiKeys = mode === 'expert' ? {} : getApiKeys();
+    const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
+
+    // Debug: show what we are about to send
+    const debugInfo = `[DEBUG] mode=${mode} model=${quickModel} providers=${Object.keys(apiKeys).join(',') || 'none'}`;
+    console.log(debugInfo);
+    document.getElementById('rightStage').innerHTML = '<div class="empty-state"><div style="font-size:32px">⏳</div><div>正在验证 API Key...</div><div style="font-size:10px;color:var(--dim);margin-top:8px">' + debugInfo + '</div></div>';
+
+    let validation = null;
+    try {
+      const vResp = await fetch('/api/deliberation/validate_keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic, question: '',
+          deliberation_mode: mode,
+          quick_model: quickModel,
+          expert_models: expertModels,
+          api_keys: apiKeys,
+          expert_api_keys: expertApiKeys,
+        }),
+      });
+      validation = await vResp.json();
+      // Always log full response for debugging
+      console.log('[VALIDATE RESPONSE]', JSON.stringify(validation));
+    } catch (e) {
+      console.error('Validation request failed:', e);
+      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><p style="color:var(--dim);font-size:10px">请检查是否通过 http://localhost:8765 访问页面</p></div>';
+      running = false;
+      return;
+    }
+
+    if (validation && validation.all_valid) {
+      // All keys valid — proceed with real API
+      statusBadge.textContent = '✅ API Key 验证通过 — 真实API模式';
+      statusBadge.className = 'status-badge running';
+      collectedData.validation = validation;
+      await startAPIDeliberation();
+    } else if (validation && validation.any_valid) {
+      // Partial success — warn but proceed
+      const failed = validation.results.filter(r => !r.valid).map(r => r.model || r.agent_id).join(', ');
+      statusBadge.textContent = '⚠️ 部分Key失败 — 混合模式';
+      statusBadge.className = 'status-badge running';
+      console.warn('Some API keys failed validation:', failed);
+      collectedData.validation = validation;
+      await startAPIDeliberation();
+    } else {
+      // All keys failed — show clear error and block
+      const errMsg = validation ? validation.summary : '无法连接验证服务';
+      const detailLines = validation ? validation.results.map(r =>
+        `  - ${r.model || r.provider}: ${r.error || '未知错误'}`
+      ).join('\n') : '';
+      const sentInfo = `发送配置: mode=${mode} model=${quickModel} key_providers=${Object.keys(apiKeys).join(',') || '无'}`;
+      const rawResponse = validation ? JSON.stringify(validation, null, 2) : 'null';
+      console.error('[VALIDATE FAILED]', rawResponse);
+      statusBadge.textContent = '❌ API Key 验证失败';
+      statusBadge.className = 'status-badge error';
+      document.getElementById('rightStage').innerHTML = `
+        <div class="empty-state" style="padding:40px;text-align:center;">
+          <div style="font-size:48px;margin-bottom:16px;">🔑</div>
+          <h3>API Key 验证失败</h3>
+          <p style="color:#ef4444;max-width:500px;margin:0 auto;">${errMsg}</p>
+          <pre style="text-align:left;max-width:500px;margin:12px auto;color:#6b7280;font-size:13px;">${detailLines}</pre>
+          <p style="color:var(--dim);font-size:11px;margin-top:8px;">${sentInfo}</p>
+          <details style="margin-top:8px;max-width:500px;text-align:left;">
+            <summary style="color:var(--dim);font-size:10px;cursor:pointer;">原始响应 (点击展开)</summary>
+            <pre style="color:#6b7280;font-size:10px;overflow:auto;max-height:200px;">${rawResponse}</pre>
+          </details>
+          <div style="margin-top:20px;display:flex;gap:12px;justify-content:center;">
+            <button onclick="running=false;document.getElementById('btnStart').disabled=false;startDeliberationFallback('${topic.replace(/'/g, "\\'")}')"
+                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">
+              使用模板模拟模式
+            </button>
+            <button onclick="running=false;document.getElementById('btnStart').disabled=false;document.getElementById('statusBadge').textContent='就绪';document.getElementById('statusBadge').className='status-badge';"
+                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">
+              返回修改 Key
+            </button>
+          </div>
+        </div>`;
+      running = false;
+      document.getElementById('btnStart').disabled = false;
+    }
+  } else {
+    document.getElementById('statusBadge').textContent = '🔄 议事进行中 (模拟模式)...';
+    document.getElementById('statusBadge').className = 'status-badge running';
+    try {
+      for await (const event of runDeliberation(topic)) {
+        if (!running) break;
+        await handleEngineEvent(event);
+      }
+    } catch (e) {
+      console.error('Deliberation error:', e);
+    }
+    finishDeliberation();
+  }
+}
+
+// Fallback: user clicked "use simulation" after validation failure
+function startDeliberationFallback(topic) {
+  running = true;
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('statusBadge').textContent = '🔄 议事进行中 (模拟模式)...';
+  document.getElementById('statusBadge').className = 'status-badge running';
+  document.getElementById('rightStage').innerHTML = '';
+  var fa = document.getElementById('facilitatorAvatars'); if (fa) fa.style.display = 'flex';
+  renderSopBar();
+  renderLeftPanel();
+  (async () => {
+    try {
+      for await (const event of runDeliberation(topic)) {
+        if (!running) break;
+        await handleEngineEvent(event);
+      }
+    } catch (e) {
+      console.error('Deliberation error:', e);
+    }
+    finishDeliberation();
+  })();
+}
+
+async function handleEngineEvent(event) {
+  if (event.type === 'delay') {
+    await new Promise(r => { timer = setTimeout(r, event.ms); });
+    return;
+  }
+
+  switch (event.type) {
+    case 'api_mode':
+      if (event.active) {
+        document.getElementById('statusBadge').textContent = '? API ' + (event.quick_model || event.mode || '');
+        document.getElementById('statusBadge').className = 'status-badge running';
+      }
+      break;
+
+    case 'phase':
+    case 'sop_phase':
+      updateSopPhase(event.phase);
+      if (event.label) {
+        const info = document.createElement('div');
+        info.className = 'phase-info';
+        info.innerHTML = '<span style="color:var(--accent)">●</span> ' + event.label;
+        addToStage(info);
+        document.getElementById('rightStage').scrollTop = document.getElementById('rightStage').scrollHeight;
+      }
+      break;
+
+    case 'phase_detail':
+    case 'evidence_summary':
+    case 'stakeholder_map':
+      // Show these as info cards in the stage
+      var infoCard2 = document.createElement('div');
+      infoCard2.className = 'chat-msg facilitator';
+      infoCard2.innerHTML = '<div class="cm-text" style="background:rgba(56,189,248,0.05);border:1px dashed rgba(56,189,248,0.2);font-size:12px;padding:10px;border-radius:8px;">' +
+        '<span style="color:var(--accent)">?</span> ' + (event.type === 'phase_detail' ? '议题分析完成' :
+        event.type === 'evidence_summary' ? '证据收集完成 (' + (event.agents || []).length + ' 个Agent)' :
+        '利益相关者分析完成') +
+        '</div>';
+      addToStage(infoCard2);
+      document.getElementById('rightStage').scrollTop = document.getElementById('rightStage').scrollHeight;
+      break;
+
+    case 'conflict_matrix':
+      collectedData.conflict = { axes: event.axes || [], hidden: event.hidden_conflicts || [], pseudo: event.pseudo_consensus_flags || [] };
+      renderConflictMatrixCard(event);
+      break;
+
+    case 'fishbowl_update':
+      updateFishbowlCenter(event.inner, event.outer, event.roundNo);
+      collectedData.fishbowl.push({ round: event.roundNo, inner: event.inner, outer: event.outer });
+      collectedData.currentRound = event.roundNo;
+      break;
+
+    case 'llm_waiting': {
+      const waitDiv = document.createElement('div');
+      waitDiv.className = 'chat-msg facilitator';
+      waitDiv.id = 'wait-' + (event.agent || '').replace(/\s/g, '');
+      waitDiv.innerHTML = '<div class="cm-text" style="background:rgba(251,191,36,0.04);border:1px dashed rgba(251,191,36,0.3);font-size:11px;padding:8px 12px;border-radius:8px;display:flex;align-items:center;gap:8px;">' +
+        '<span class="llm-spin" style="display:inline-block;animation:spin 1s linear infinite;font-size:14px;">⏳</span>' +
+        '<span>正在等待 <strong>' + (event.agent || 'LLM') + '</strong> ' + (event.action || '生成回应') + '...</span>' +
+        '</div>';
+      addToStage(waitDiv);
+      document.getElementById('rightStage').scrollTop = document.getElementById('rightStage').scrollHeight;
+      break;
+    }
+
+    case 'round_divider': {
+      const divider = document.createElement('div');
+      divider.className = 'chat-msg round-divider';
+      divider.innerHTML = `<span class="rd-label">🔵 第 ${event.roundNo} 轮鱼缸讨论 · 内圈：${event.inner.map(a => a.name).join('、')}</span>`;
+      addToStage(divider);
+      const chatStream = document.createElement('div');
+      chatStream.className = 'chat-stream';
+      chatStream.id = `chatStream-${event.roundNo}`;
+      document.getElementById('rightStage').appendChild(chatStream);
+      break;
+    }
+
+    case 'speech': {
+      // Remove waiting indicator for this agent
+      const waitId = 'wait-' + (event.agent?.name || '').replace(/\s/g, '');
+      const waitEl = document.getElementById(waitId);
+      if (waitEl) waitEl.remove();
+
+      const agent = event.agent;
+      const rn = event.roundNo || collectedData.currentRound || 1;
+
+      collectedData.dialogue.push({
+        agent_id: agent.id, text: event.text,
+        round_no: rn, isFacilitator: event.isFacilitator || agent.isFacilitator
+      });
+      collectedData.speakCounts[agent.id] = (collectedData.speakCounts[agent.id] || 0) + 1;
+
+      if (!agent.isFacilitator && !event.isFacilitator) {
+        updateAgentInLeft(agent.id, null, collectedData.speakCounts[agent.id]);
+      }
+
+      const chatStream = document.getElementById(`chatStream-${rn}`);
+      if (chatStream) {
+        renderSpeechBubble(chatStream, agent, event.text, event.isFacilitator || agent.isFacilitator);
+      }
+
+      highlightSpeaker(agent, event.isFacilitator || agent.isFacilitator);
+      await new Promise(r => { timer = setTimeout(r, 80 + (event.text || '').length * 3); });
+      break;
+    }
+
+    case 'round_summary':
+      collectedData.summaries.push(event.summary);
+      renderRoundSummaryCard(event.summary);
+      await new Promise(r => { timer = setTimeout(r, 350); });
+      break;
+
+    case 'deliberation_plan':
+      collectedData.deliberationPlans.push(event.plan);
+      renderDeliberationPlan(event.plan);
+      await new Promise(r => { timer = setTimeout(r, 200); });
+      break;
+
+    case 'outer_observation':
+      collectedData.outerObservations.push(event.observation);
+      renderOuterObservation(event.observation);
+      await new Promise(r => { timer = setTimeout(r, 200); });
+      break;
+
+    case 'observer_snapshot':
+      collectedData.observerSnapshots.push(event.snapshot);
+      renderObserverSnapshot(event.snapshot);
+      await new Promise(r => { timer = setTimeout(r, 200); });
+      break;
+
+    case 'gate_result':
+      collectedData.gateResults.push(event);
+      renderGateResult(event);
+      await new Promise(r => { timer = setTimeout(r, 100); });
+      break;
+
+    case 'review_card':
+      collectedData.reviewCards.push(event);
+      collectedData.review = {
+        recommendation: event.recommendation,
+        issues: event.required_revisions || [],
+        detail: event.detail || '',
+        public_resource_scores: event.public_resource_scores || {},
+        universalization_result: event.universalization_result || {},
+      };
+      renderReviewCard(event);
+      break;
+
+    case 'conflict_review':
+      collectedData.conflict = event.conflict;
+      renderConflictMatrix(event.conflict);
+      await new Promise(r => { timer = setTimeout(r, 350); });
+      break;
+
+    case 'proposal':
+      collectedData.proposal = {
+        title: event.title,
+        content: event.content,
+        responsible: event.responsible,
+        timeline: event.timeline,
+        resources: event.resources,
+        risks: event.risks,
+        evaluation_criteria: event.evaluation_criteria,
+        status: event.status,
+        version: event.version,
+      };
+      renderProposalCard(collectedData.proposal);
+      await new Promise(r => { timer = setTimeout(r, 350); });
+      break;
+
+    case 'validation':
+      collectedData.validation = event.validation;
+      renderValidationBar(event.validation);
+      await new Promise(r => { timer = setTimeout(r, 250); });
+      break;
+
+    case 'executive_summary':
+      collectedData.executiveSummary = event.executive_summary || '';
+      collectedData.recommendations = event.recommendations || [];
+      renderExecutiveSummary(event);
+      break;
+
+    case 'complete':
+      collectedData.dialogue = event.dialogue || [];
+      collectedData.summaries = event.summaries || [];
+      collectedData.conflict = event.conflict || null;
+      collectedData.proposal = event.proposal || null;
+      collectedData.review = event.review || null;
+      collectedData.validation = event.validation || null;
+      collectedData.speakCounts = event.speak_counts || {};
+      collectedData.totalRounds = event.total_rounds || 0;
+      collectedData.totalSpeeches = event.total_speeches || 0;
+      collectedData.summaryText = event.summary_text || null;
+      if (!collectedData.executiveSummary) collectedData.executiveSummary = event.executive_summary || '';
+      if (!collectedData.recommendations.length) collectedData.recommendations = event.recommendations || [];
+      break;
+  }
 }
 
 function finishDeliberation() {
   running = false;
   if (timer) clearTimeout(timer);
-  document.getElementById('statusBadge').textContent = '? 议事完成';
+  document.getElementById('statusBadge').textContent = '✅ 议事完成';
   document.getElementById('statusBadge').className = 'status-badge done';
   document.getElementById('btnStart').disabled = false;
-  document.getElementById('btnStart').innerHTML = '? 重新议事';
+  document.getElementById('btnStart').innerHTML = '🔄 重新议事';
   document.getElementById('btnReport').disabled = false;
-  updateMetricsFromTurns();
-  updateProgress();
-}
-
-// ============================================================
-// TRANSCRIPT
-// ============================================================
-function updateTranscript() {
-  const list = document.getElementById('transcriptList');
-  list.innerHTML = '';
-  turns.forEach((t, i) => {
-    const a = AGENTS.find(x => x.id === t.speaker_id) || {};
-    const div = document.createElement('div');
-    div.className = 'ts-i' + (i === currentTurnIdx ? ' active' : '');
-    div.innerHTML = `
-      <div class="ts-av" style="background:${a.bg||'#334155'};color:${a.color||'#94a3b8'}">${a.emoji||'?'}</div>
-      <div class="ts-body">
-        <div class="ts-hd"><span class="ts-nm">${t.speaker_name}</span><span>第${t.turn}轮</span></div>
-        ${t.reply_to ? `<div class="ts-rp">? ${t.reply_to}</div>` : ''}
-        <div class="ts-tx">${t.content}</div>
-      </div>
-    `;
-    list.appendChild(div);
+  SOP_PHASES.forEach(p => {
+    const el = document.getElementById(`sop-${p.id}`);
+    if (el) el.classList.add('done');
   });
-  if (turns.length > 0) {
-    list.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
-
-// ============================================================
-// METRICS
-// ============================================================
-function updateMetricsFromTurns() {
-  if (turns.length === 0) return;
-  const total = turns.length;
-
-  // Speaker shares
-  const counts = {};
-  turns.forEach(t => { counts[t.speaker_name] = (counts[t.speaker_name]||0) + 1; });
-  const shares = {};
-  AGENTS.forEach(a => { shares[a.name] = (counts[a.name]||0) / total; });
-
-  // Grounding rate
-  const grounded = turns.filter(t => t.evidence_ids && t.evidence_ids.length > 0).length;
-  const gRate = total > 0 ? grounded / total : 0;
-
-  // Consensus
-  const latestStances = {};
-  turns.forEach(t => { latestStances[t.speaker_name] = t.stance_score; });
-  AGENTS.forEach(a => { if (!(a.name in latestStances)) latestStances[a.name] = a.stance; });
-  const vals = Object.values(latestStances);
-  const mean = vals.reduce((s,v)=>s+v,0)/vals.length;
-  const variance = vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length;
-  const consensus = Math.max(0, Math.min(1, 1-variance));
-
-  // Polarization
-  let maxDist = 0;
-  for (let i=0;i<vals.length;i++) for (let j=i+1;j<vals.length;j++) maxDist = Math.max(maxDist, Math.abs(vals[i]-vals[j]));
-  const pol = maxDist / 2;
-
-  // Gini
-  const sv = Object.values(shares).sort((a,b)=>a-b);
-  const n = sv.length;
-  let idxSum = 0; sv.forEach((v,i)=>{idxSum += (i+1)*v;});
-  const sum = sv.reduce((a,b)=>a+b,0);
-  const gini = sum>0 ? Math.max(0,(2*idxSum)/(n*sum)-(n+1)/n) : 0;
-
-  document.getElementById('mGini').textContent = gini.toFixed(3);
-  document.getElementById('mGiniBar').style.width = Math.min(gini*5,1)*100+'%';
-  document.getElementById('mGround').textContent = (gRate*100).toFixed(1)+'%';
-  document.getElementById('mGroundBar').style.width = (gRate*100)+'%';
-  document.getElementById('mConsensus').textContent = consensus.toFixed(3);
-  document.getElementById('mConsensusBar').style.width = (consensus*100)+'%';
-  document.getElementById('mPol').textContent = pol.toFixed(3);
-  document.getElementById('mPolBar').style.width = (pol*100)+'%';
-
-  updateSpeakerBarChart(shares);
-}
-
-function resetMetrics() {
-  document.getElementById('mGini').textContent = '--';
-  document.getElementById('mGiniBar').style.width = '0%';
-  document.getElementById('mGround').textContent = '--';
-  document.getElementById('mGroundBar').style.width = '0%';
-  document.getElementById('mConsensus').textContent = '--';
-  document.getElementById('mConsensusBar').style.width = '0%';
-  document.getElementById('mPol').textContent = '--';
-  document.getElementById('mPolBar').style.width = '0%';
-  updateSpeakerBarChart({});
-}
-
-function renderSpeakerBars() {
-  document.getElementById('speakerBars').innerHTML = AGENTS.map(a => `
-    <div class="sr">
-      <span class="sn">${a.name.slice(0,5)}</span>
-      <div class="st"><div class="sf" id="sb-${a.id}" style="width:0%;background:${a.color}"></div></div>
-      <span style="font-size:10px;color:var(--text-muted);min-width:26px;text-align:right" id="sp-${a.id}">0%</span>
-    </div>
-  `).join('');
-}
-
-function updateSpeakerBarChart(shares) {
-  AGENTS.forEach(a => {
-    const bar = document.getElementById(`sb-${a.id}`);
-    const pct = document.getElementById(`sp-${a.id}`);
-    const v = (shares[a.name]||0)*100;
-    if (bar) bar.style.width = v+'%';
-    if (pct) pct.textContent = Math.round(v)+'%';
-  });
-}
-
-function updateProgress() {
-  const total = TURNS.length;
-  const current = Math.max(0, currentTurnIdx + 1);
-  const pct = total > 0 ? (current / total * 100) : 0;
-  document.getElementById('progFill').style.width = pct + '%';
-  document.getElementById('progText').textContent = `${current} / ${total}`;
 }
 
 // ============================================================
@@ -670,76 +1922,538 @@ function updateProgress() {
 function showReport() {
   const modal = document.getElementById('reportModal');
   const content = document.getElementById('reportContent');
+  const dialogue = collectedData.dialogue || [];
+  const summaries = collectedData.summaries || [];
+  const conflict = collectedData.conflict || {axes:[]};
+  const proposal = collectedData.proposal || {};
+  const validation = collectedData.validation || {passed:false,issues:[],action_items:[]};
+  const review = collectedData.review || {};
+  const executiveSummary = collectedData.executiveSummary || '';
+  const recommendations = collectedData.recommendations || [];
+  const speakCounts = collectedData.speakCounts || {};
+  const summaryText = collectedData.summaryText || {};
 
-  const total = turns.length || TURNS.length;
-  const grounded = turns.filter(t => t.evidence_ids?.length > 0).length;
-  const gRate = total>0 ? (grounded/total*100).toFixed(1) : '0.0';
+  const getStance = (s) => s > 0.6 ? 'support' : s > 0.3 ? 'conditional_support' : s < -0.6 ? 'oppose' : s < -0.3 ? 'conditional_oppose' : 'neutral';
+  const stanceLabel = { support: '✅ 支持', conditional_support: '💙 条件支持', neutral: '⬜ 中立', conditional_oppose: '⚠️ 条件反对', oppose: '❌ 反对' };
+  const intensityLabel = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
 
-  const initVals = AGENTS.map(a=>a.stance);
-  const im = initVals.reduce((s,v)=>s+v,0)/initVals.length;
-  const iv = initVals.reduce((s,v)=>s+(v-im)**2,0)/initVals.length;
-  const initConsensus = Math.max(0,Math.min(1,1-iv));
+  const roundDialogue = {};
+  dialogue.forEach(d => {
+    const r = d.round_no || 1;
+    if (!roundDialogue[r]) roundDialogue[r] = [];
+    roundDialogue[r].push(d);
+  });
 
-  const latest = {};
-  turns.forEach(t=>{latest[t.speaker_name]=t.stance_score;});
-  AGENTS.forEach(a=>{if(!(a.name in latest))latest[a.name]=a.stance;});
-  const lv = Object.values(latest);
-  const lm = lv.reduce((s,v)=>s+v,0)/lv.length;
-  const lvar = lv.reduce((s,v)=>s+(v-lm)**2,0)/lv.length;
-  const finalConsensus = Math.max(0,Math.min(1,1-lvar));
+  const totalSpeeches = collectedData.totalSpeeches || dialogue.length;
+  const totalRounds = collectedData.totalRounds || summaries.length;
 
   content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2>? 议事报告</h2>
-      <button class="btn" onclick="document.getElementById('reportModal').classList.add('hidden')" style="padding:5px 10px">? 关闭</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px">
+      <h2 style="margin:0">📋 议事报告</h2>
+      <button class="btn" onclick="document.getElementById('reportModal').classList.add('hidden')" style="padding:5px 10px">✕ 关闭</button>
     </div>
-    <p style="color:var(--text-dim);margin-bottom:14px">
-      <strong>议题:</strong> ${document.getElementById('topicDisplay').textContent}<br>
-      <strong>议事轮数:</strong> ${total} 轮 | <strong>角色:</strong> ${AGENTS.length} 个
-    </p>
-    <h3>? 议事指标</h3>
-    <table>
-      <tr><td style="color:var(--text-dim)">发言公平性 Gini</td><td style="font-family:var(--font-mono);color:var(--success)">0.021</td></tr>
-      <tr><td style="color:var(--text-dim)">Grounding 率</td><td style="font-family:var(--font-mono);color:var(--accent)">${gRate}%</td></tr>
-      <tr><td style="color:var(--text-dim)">共识度变化</td><td style="font-family:var(--font-mono)">${initConsensus.toFixed(3)} → ${finalConsensus.toFixed(3)}</td></tr>
-      <tr><td style="color:var(--text-dim)">极化程度</td><td style="font-family:var(--font-mono);color:var(--warning)">0.350</td></tr>
+
+    <div style="background:var(--card);border-radius:var(--radius);padding:12px 16px;margin-bottom:14px">
+      <p style="color:var(--dim);margin:0;line-height:1.8">
+        <strong style="color:var(--text)">议题:</strong> ${document.getElementById('topicDisplay').textContent}<br>
+        <strong style="color:var(--text)">鱼缸轮数:</strong> ${totalRounds} 轮 | <strong style="color:var(--text)">发言条数:</strong> ${totalSpeeches} 条<br>
+        <strong style="color:var(--text)">参与方:</strong> ${AGENTS.filter(a => !a.isFacilitator).length} 个利益相关方 + ${AGENTS.filter(a => a.isFacilitator).length} 个议事支持角色
+      </p>
+    </div>
+
+    <h3>👥 参与方发言统计</h3>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+      ${AGENTS.filter(a => !a.isFacilitator).map(a => {
+        const count = speakCounts[a.id] || 0;
+        const st = getStance(a.stance);
+        return `<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">${a.emoji} <strong>${a.name}</strong></td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--dim)">${a.role}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)"><span class="am-stance stance-${st}">${stanceLabel[st]}</span></td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">💬 ${count} 条发言</td></tr>`;
+      }).join('')}
+      <tr style="border-top:2px solid var(--border)"><td colspan="4" style="padding:6px 8px;font-size:10px;color:var(--warn)">🎤 议事支持角色</td></tr>
+      ${AGENTS.filter(a => a.isFacilitator).map(a => {
+        const count = speakCounts[a.id] || 0;
+        return `<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">${a.emoji} <strong>${a.name}</strong></td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--dim)">${a.role}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)"><span class="am-stance stance-neutral">⬜ 中立</span></td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">💬 ${count} 条发言</td></tr>`;
+      }).join('')}
     </table>
-    <h3>? 共识点</h3>
-    <ul>
-      <li>以四周试点替代一刀切决策，不立即取缔也不无限期放任</li>
-      <li>摊位编号与地面边界线划定，纳入网格化管理</li>
-      <li>卫生押金 + 环卫附加费机制，摊贩承担部分治理成本</li>
-      <li>分季节闭市时间（冬季 22:00 / 夏季 22:30），21:30 后禁止高噪声设备</li>
-      <li>建立数据驱动的达标/退出 KPI 体系（投诉下降 50%、环卫评分 C 级以上、消防通道无占用）</li>
-    </ul>
-    <h3>? 分歧点</h3>
-    <ul>
-      <li>环卫附加费的具体金额：需实地测算环卫增额成本后确定</li>
-      <li>摊位费标准：各方对"合理价格"的预期可能不同</li>
-      <li>摊贩对"试点后长期经营权"的稳定性预期 vs 居民对"不达标则退出"的严格性要求</li>
-    </ul>
-    <h3>? 少数意见</h3>
-    <ul>
-      <li><strong>环卫人员代表:</strong> 试点期间的环卫增额经费必须专款专用，治理成本不能只被转嫁</li>
-    </ul>
-    <h3>? 可执行方案</h3>
-    <p><strong>四周试点方案</strong> — 街道办 | 4周 | 网格巡查人力、地面标线材料、垃圾桶增配</p>
-    <p><strong>摊位编号与边界线划定</strong> — 街道办+城管 | 试点前完成 | 地面标线、摊位编号牌</p>
-    <p><strong>环卫附加费专款专用</strong> — 街道办+环卫 | 试点前确定费率 | 需实地测算</p>
-    <p><strong>投诉快速响应小程序</strong> — 街道办 | 第一周上线 | 基于现有网格化系统</p>
-    <h3>? 待实地调研问题</h3>
-    <ul>
-      <li>环卫增额成本实地测算：夜市区域的清扫时间、人力、设备比普通区域多出多少？</li>
-      <li>摊位费标准调研：周边类似夜市的摊位费水平？摊贩可承受范围？</li>
-      <li>交通流量基线数据：试点前一个月夜市区域人流量、车流量、消防通道占用频率？</li>
-      <li>居民满意度基线：试点前居民对噪声、油烟、垃圾的满意度评分？</li>
-      <li>摊贩经营状况摸底：摊贩家庭收入依赖夜市的比例？取缔后的替代生计选项？</li>
-    </ul>
-    <p style="margin-top:20px;padding:10px;background:rgba(251,191,36,0.08);border-left:3px solid var(--warning);border-radius:4px;font-size:11px;color:var(--text-dim)">
-      ? <strong>重要提示:</strong> 本报告由多智能体议事系统自动生成，不替代真实公众参与和实地调研。AI 议事仅作为规划师决策辅助工具。
+
+    <h3>💬 逐轮讨论记录</h3>
+    ${Object.keys(roundDialogue).length === 0 ? '<p style="color:var(--dim);font-size:11px">暂无对话记录</p>' :
+    Object.keys(roundDialogue).sort().map(r => `
+      <div style="margin:10px 0;padding:10px 12px;background:var(--card);border-radius:8px;border-left:3px solid var(--accent)">
+        <div style="font-weight:700;font-size:12px;color:var(--accent);margin-bottom:8px">🔵 第 ${r} 轮对话</div>
+        ${roundDialogue[r].map(d => {
+          const a = AGENTS.find(x => x.id === d.agent_id);
+          if (!a) return '';
+          const txt = (d.text || '').replace(/@([一-鿿]+)/g, '<strong style="color:var(--accent)">@$1</strong>');
+          const isFac = d.isFacilitator || (a && a.isFacilitator);
+          return `<div style="margin:6px 0;padding:8px 10px;background:${isFac ? 'rgba(251,191,36,0.04)' : 'rgba(255,255,255,0.02)'};border-radius:6px;font-size:11px;line-height:1.6">
+            <div style="margin-bottom:3px"><span style="color:${a.color};font-weight:600">${a.emoji} ${a.name}</span><span style="color:var(--dim);font-size:9px;margin-left:6px">${a.role}</span></div>
+            <div style="color:var(--text)">${txt}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    `).join('')}
+
+    <h3>📊 轮次摘要</h3>
+    ${summaries.length === 0 ? '<p style="color:var(--dim);font-size:11px">暂无轮次摘要</p>' :
+    summaries.map(s => `
+      <div style="margin:8px 0;padding:10px 12px;background:var(--card);border-radius:8px;font-size:11px">
+        <div style="font-weight:700;margin-bottom:6px">📋 第 ${s.round_no} 轮摘要</div>
+        ${(s.majority_views || []).length ? '<div style="margin:4px 0"><span style="color:var(--cond-support)">✅ 多数意见：</span>' + s.majority_views.map(function(v){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + v + '</div>';}).join('') + '</div>' : ''}
+        ${(s.minority_views || []).length ? '<div style="margin:4px 0"><span style="color:var(--warn)">⚠️ 少数意见：</span>' + s.minority_views.map(function(v){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + v + '</div>';}).join('') + '</div>' : ''}
+        ${(s.unresolved_conflicts || []).length ? '<div style="margin:4px 0"><span style="color:var(--err)">⚡ 未解决冲突：</span>' + s.unresolved_conflicts.map(function(v){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + v + '</div>';}).join('') + '</div>' : ''}
+        ${(s.evidence_gaps || []).length ? '<div style="margin:4px 0"><span style="color:var(--muted)">📎 证据缺口：</span>' + s.evidence_gaps.join('；') + '</div>' : ''}
+        ${(s.next_round_questions || []).length ? '<div style="margin:4px 0"><span style="color:var(--accent)">❓ 待深入问题：</span>' + s.next_round_questions.map(function(v){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + v + '</div>';}).join('') + '</div>' : ''}
+      </div>
+    `).join('')}
+
+    ${(summaryText && summaryText.majority_views && summaryText.majority_views.length) ? `
+    <h3>📌 最终共识摘要</h3>
+    <div style="margin:8px 0;padding:10px 12px;background:rgba(52,211,153,0.05);border:1px solid rgba(52,211,153,0.2);border-radius:8px;font-size:11px">
+      ${(summaryText.majority_views || []).map(function(v){return '<div style="margin:3px 0;color:var(--text)">✅ ' + v + '</div>';}).join('')}
+      ${(summaryText.minority_views || []).length ? '<div style="margin-top:8px;color:var(--warn)">⚠️ <strong>保留的少数意见：</strong></div>' + summaryText.minority_views.map(function(v){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + v + '</div>';}).join('') : ''}
+      ${(summaryText.unresolved_conflicts || []).length ? '<div style="margin-top:8px;color:var(--err)">⚡ <strong>未解决冲突：</strong></div>' + summaryText.unresolved_conflicts.map(function(v){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + v + '</div>';}).join('') : ''}
+    </div>` : ''}
+
+    <h3>⚡ 冲突矩阵</h3>
+    ${(conflict.axes || []).length === 0 ? '<p style="color:var(--dim);font-size:11px">暂无冲突数据</p>' :
+    conflict.axes.map(ax => `
+      <div style="margin:6px 0;padding:8px 10px;background:var(--card);border-radius:6px;font-size:11px">
+        <span style="font-weight:600;margin-right:6px">${intensityLabel[ax.intensity] || ax.intensity}</span>
+        <strong>${ax.name}</strong>
+        <span style="color:var(--dim)"> — ${(ax.parties || []).join(' vs ')}</span>
+        ${ax.positions ? '<div style="margin-top:4px;font-size:10px;color:var(--dim)">' + Object.entries(ax.positions).map(function(e){return e[0] + ': ' + e[1];}).join(' | ') + '</div>' : ''}
+      </div>
+    `).join('')}
+
+    <h3>📝 工作方案</h3>
+    <div style="margin:8px 0;padding:12px;background:var(--card);border-radius:8px;border-left:3px solid var(--accent2)">
+      <div style="font-weight:700;margin-bottom:8px;color:var(--accent2)">${proposal.title || '未命名方案'}</div>
+      <div style="font-size:11px;color:var(--text);white-space:pre-line;line-height:1.7">${proposal.content || '暂未生成方案内容'}</div>
+      ${proposal.responsible ? '<div style="margin-top:10px;font-size:10px;color:var(--dim)"><strong>责任主体：</strong>' + proposal.responsible + '</div>' : ''}
+      ${proposal.timeline ? '<div style="font-size:10px;color:var(--dim)"><strong>时间线：</strong>' + proposal.timeline + '</div>' : ''}
+      ${(proposal.evaluation_criteria || []).length ? '<div style="font-size:10px;color:var(--dim)"><strong>评估标准：</strong>' + proposal.evaluation_criteria.join('；') + '</div>' : ''}
+    </div>
+
+    ${(review.recommendation || review.detail) ? `
+    <h3>🔍 S10 方案审查</h3>
+    <div style="margin:8px 0;padding:10px 12px;background:var(--card);border-radius:8px;border-left:3px solid ${review.recommendation === 'pass' ? 'var(--ok)' : review.recommendation === 'reject' ? 'var(--err)' : 'var(--warn)'};font-size:11px">
+      <div style="font-weight:700;margin-bottom:4px;color:${review.recommendation === 'pass' ? 'var(--ok)' : review.recommendation === 'reject' ? 'var(--err)' : 'var(--warn)'}">审查结论: ${review.recommendation || 'N/A'}</div>
+      ${review.detail ? '<div style="color:var(--text);line-height:1.5;margin:4px 0">' + review.detail + '</div>' : ''}
+      ${(review.public_resource_scores && Object.keys(review.public_resource_scores).length) ? '<div style="display:flex;gap:8px;margin:4px 0;font-size:10px">公共资源评分: ' + Object.entries(review.public_resource_scores).map(function(e){return '<span style="background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px">' + e[0] + ': ' + e[1] + '/5</span>';}).join('') + '</div>' : ''}
+      ${(review.issues || []).length ? '<div style="margin-top:4px;font-size:10px;color:var(--dim)">发现的问题：' + review.issues.map(function(i){return '<div style="margin:2px 0 2px 12px">· ' + i + '</div>';}).join('') + '</div>' : ''}
+    </div>` : ''}
+
+    <h3>🔍 S11 校验结果</h3>
+    <div style="margin:8px 0;padding:10px 12px;background:var(--card);border-radius:8px;font-size:11px">
+      <div style="margin-bottom:6px"><span style="font-weight:700;font-size:14px;color:${validation.passed ? 'var(--ok)' : 'var(--err)'}">${validation.passed ? '✅ 校验通过' : '❌ 校验未通过'}</span>${validation.score != null ? '<span style="color:var(--dim);margin-left:8px">得分: ' + validation.score + '</span>' : ''}</div>
+      ${(validation.issues || []).length ? '<div style="margin-top:6px"><strong style="color:var(--warn)">问题：</strong>' + validation.issues.map(function(i){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + i + '</div>';}).join('') + '</div>' : ''}
+      ${(validation.action_items || []).length ? '<div style="margin-top:6px"><strong style="color:var(--accent)">改进建议：</strong>' + validation.action_items.map(function(i){return '<div style="margin:2px 0 2px 12px;color:var(--dim)">· ' + i + '</div>';}).join('') + '</div>' : ''}
+    </div>
+
+    ${executiveSummary ? `
+    <h3>📋 S12 执行摘要</h3>
+    <div style="margin:8px 0;padding:12px;background:rgba(52,211,153,0.04);border:1px solid rgba(52,211,153,0.15);border-radius:8px;font-size:11px;line-height:1.7">
+      <div style="color:var(--text)">${executiveSummary}</div>
+      ${recommendations.length ? '<div style="margin-top:10px"><strong style="color:var(--accent)">行动建议：</strong>' + recommendations.map(function(r,i){return '<div style="margin:3px 0 3px 12px;color:var(--dim)">' + (i+1) + '. ' + r + '</div>';}).join('') + '</div>' : ''}
+    </div>` : ''}
+
+    <p style="margin-top:20px;padding:10px 12px;background:rgba(251,191,36,0.06);border-left:3px solid var(--warn);border-radius:4px;font-size:10px;color:var(--dim);line-height:1.6">
+      ⚠️ <strong>重要提示:</strong> 本报告由多智能体议事系统基于 AI 大模型自动生成，旨在辅助规划师进行决策分析，不替代真实的公众参与、实地调研和专业判断。报告中的观点、数据和方案建议均为 AI 模拟生成，不可直接作为政策依据。
     </p>
   `;
   modal.classList.remove('hidden');
+}
+
+// ============================================================
+// MODE SELECTION (Quick / Expert)
+// ============================================================
+let currentMode = 'quick';
+
+// ── Model → Provider mapping for API keys ─────────────────────
+const MODEL_PROVIDER_MAP = {
+  'deepseek-v4-pro': { provider: 'deepseek', keyField: 'apikey-deepseek' },
+  'deepseek-v4-flash': { provider: 'deepseek', keyField: 'apikey-deepseek' },
+  'deepseek-chat': { provider: 'deepseek', keyField: 'apikey-deepseek' },
+  'deepseek-reasoner': { provider: 'deepseek', keyField: 'apikey-deepseek' },
+  'gpt-4o': { provider: 'openai', keyField: 'apikey-openai' },
+  'gpt-4o-mini': { provider: 'openai', keyField: 'apikey-openai' },
+  'claude-opus-4-7': { provider: 'anthropic', keyField: 'apikey-anthropic' },
+  'claude-sonnet-4-6': { provider: 'anthropic', keyField: 'apikey-anthropic' },
+  'claude-haiku-4-5': { provider: 'anthropic', keyField: 'apikey-anthropic' },
+  'gemini-2.5-pro': { provider: 'gemini', keyField: 'apikey-gemini' },
+  'gemini-2.5-flash': { provider: 'gemini', keyField: 'apikey-gemini' },
+  'qwen-max': { provider: 'qwen', keyField: 'apikey-qwen' },
+  'qwen-plus': { provider: 'qwen', keyField: 'apikey-qwen' },
+  'glm-4-plus': { provider: 'zhipu', keyField: 'apikey-zhipu' },
+  'moonshot-v1-8k': { provider: 'moonshot', keyField: 'apikey-moonshot' },
+};
+
+// ── API Key helpers ──────────────────────────────────────────
+function toggleApiKeys() {
+  const body = document.getElementById('apiKeysBody');
+  const toggle = document.getElementById('apiKeysToggle');
+  const open = body.classList.toggle('open');
+  toggle.classList.toggle('open', open);
+}
+
+function toggleKeyVisibility(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = '?';
+  } else {
+    input.type = 'password';
+    btn.textContent = '?';
+  }
+}
+
+function onApiKeyChange() {
+  updateApiKeyStatus();
+  updateModeHint();
+}
+
+function clearApiKeyFields() {
+  const fields = ['openai', 'anthropic', 'deepseek', 'qwen', 'zhipu', 'moonshot', 'gemini'];
+  fields.forEach(f => {
+    const el = document.getElementById('apikey-' + f);
+    if (el) el.value = '';
+  });
+}
+
+function getApiKeys() {
+  const keys = {};
+  const fields = ['openai', 'anthropic', 'deepseek', 'qwen', 'zhipu', 'moonshot', 'gemini'];
+  fields.forEach(f => {
+    const el = document.getElementById('apikey-' + f);
+    if (el && el.value.trim()) {
+      keys[f] = el.value.trim();
+    }
+  });
+  return keys;
+}
+
+function getExpertApiKeysForRequest() {
+  if (currentMode !== 'expert') return {};
+  const keys = {};
+  AGENTS.forEach(a => {
+    const el = document.getElementById('expertKey_' + a.id);
+    if (el && el.value.trim()) {
+      keys[a.id] = el.value.trim();
+    }
+  });
+  return keys;
+}
+
+function hasApiKeys() {
+  if (currentMode === 'expert') {
+    return Object.keys(getExpertApiKeysForRequest()).length > 0;
+  }
+  return Object.keys(getApiKeys()).length > 0;
+}
+
+function updateApiKeyStatus() {
+  const status = document.getElementById('akStatus');
+  if (!status) return;
+  if (hasApiKeys()) {
+    status.textContent = '? API Key 已配置 — 将使用真实API驱动议事';
+    status.className = 'ak-status has-keys';
+  } else {
+    status.textContent = '? 未配置API Key — 将使用模板模拟模式';
+    status.className = 'ak-status no-keys';
+  }
+}
+
+function getApiKeyForModel(modelName) {
+  const info = MODEL_PROVIDER_MAP[modelName];
+  if (!info) return '';
+  const el = document.getElementById(info.keyField);
+  return el ? el.value.trim() : '';
+}
+
+// Quick mode: highlight which API key is needed for current model
+function highlightActiveApiKey() {
+  const model = document.getElementById('quickModelSelect')?.value || '';
+  const info = MODEL_PROVIDER_MAP[model];
+  // Dim all rows, highlight the relevant one
+  document.querySelectorAll('.api-key-row').forEach(row => row.style.opacity = '0.5');
+  if (info) {
+    const row = document.getElementById('akRow-' + info.provider);
+    if (row) row.style.opacity = '1';
+  }
+}
+
+// Save API keys to sessionStorage (never localStorage for security)
+function saveApiKeys() {
+  const keys = getApiKeys();
+  try { sessionStorage.setItem('deliberation_api_keys', JSON.stringify(keys)); } catch (e) {}
+  if (currentMode === 'expert') saveExpertApiKeys();
+}
+
+function loadApiKeys() {
+  try {
+    const saved = sessionStorage.getItem('deliberation_api_keys');
+    if (saved) {
+      const keys = JSON.parse(saved);
+      Object.entries(keys).forEach(([provider, key]) => {
+        const el = document.getElementById('apikey-' + provider);
+        if (el && key) el.value = key;
+      });
+    }
+  } catch (e) {}
+  updateApiKeyStatus();
+}
+
+function updateModeHint() {
+  const hint = document.getElementById('modeHint');
+  if (!hint) return;
+  const modeLabel = currentMode === 'quick' ? '快速模式' : '专家模式';
+  const hasKeys = hasApiKeys();
+  const apiLabel = hasKeys ? '? 真实API模式' : '? 模板模拟模式';
+  if (currentMode === 'quick') {
+    hint.innerHTML = '当前为<strong>' + modeLabel + '</strong> · ' + apiLabel + '<br><span style="color:var(--accent2)">' + (hasKeys ? '已配置API Key，将使用真实LLM驱动议事' : '填写API Key可启用真实API驱动议事') + '</span>';
+  } else {
+    hint.innerHTML = '当前为<strong>' + modeLabel + '</strong> · ' + apiLabel + '<br><span style="color:var(--accent2)">' + (hasKeys ? '已配置API Key，各角色使用指定模型' : '填写各角色对应提供商的API Key以启用真实API') + '</span>';
+  }
+}
+
+const QUICK_MODEL_OPTIONS = [
+  { v: 'deepseek-v4-pro', t: 'DeepSeek V4 Pro', g: 'DeepSeek' },
+  { v: 'deepseek-v4-flash', t: 'DeepSeek V4 Flash', g: 'DeepSeek' },
+  { v: 'deepseek-chat', t: 'DeepSeek V3', g: 'DeepSeek' },
+  { v: 'deepseek-reasoner', t: 'DeepSeek R1', g: 'DeepSeek' },
+  { v: 'gpt-4o', t: 'GPT-4o', g: 'OpenAI' },
+  { v: 'gpt-4o-mini', t: 'GPT-4o Mini', g: 'OpenAI' },
+  { v: 'claude-opus-4-7', t: 'Claude Opus 4.7', g: 'Anthropic' },
+  { v: 'claude-sonnet-4-6', t: 'Claude Sonnet 4.6', g: 'Anthropic' },
+  { v: 'claude-haiku-4-5', t: 'Claude Haiku 4.5', g: 'Anthropic' },
+  { v: 'gemini-2.5-pro', t: 'Gemini 2.5 Pro', g: 'Google' },
+  { v: 'gemini-2.5-flash', t: 'Gemini 2.5 Flash', g: 'Google' },
+  { v: 'qwen-max', t: 'Qwen Max', g: '阿里通义' },
+  { v: 'qwen-plus', t: 'Qwen Plus', g: '阿里通义' },
+  { v: 'glm-4-plus', t: 'GLM-4 Plus', g: '智谱' },
+  { v: 'moonshot-v1-8k', t: 'Moonshot v1', g: '月之暗面' },
+];
+
+const DEFAULT_EXPERT_MODELS = {
+  'a0': 'deepseek-v4-pro', 'a1': 'deepseek-v4-pro', 'a2': 'deepseek-v4-pro',
+  'a3': 'qwen-plus', 'a4': 'deepseek-v4-pro', 'a5': 'claude-sonnet-4-6',
+  'mod': 'claude-sonnet-4-6', 'rev': 'claude-opus-4-7',
+};
+
+function switchMode(mode) {
+  currentMode = mode;
+  var tq = document.getElementById('modeTabQuick'); if (tq) tq.classList.toggle('active', mode === 'quick');
+  var te = document.getElementById('modeTabExpert'); if (te) te.classList.toggle('active', mode === 'expert');
+  var qc = document.getElementById('quickModeConfig'); if (qc) qc.style.display = mode === 'quick' ? 'block' : 'none';
+  var ec = document.getElementById('expertModeConfig'); if (ec) ec.style.display = mode === 'expert' ? 'block' : 'none';
+  updateModeHint();
+  if (mode === 'quick') highlightActiveApiKey();
+}
+
+function buildExpertAgentList() {
+  const container = document.getElementById('expertAgentList');
+  if (!container) return;
+  const groups = {};
+  QUICK_MODEL_OPTIONS.forEach(o => {
+    if (!groups[o.g]) groups[o.g] = [];
+    groups[o.g].push(o);
+  });
+  let html = '';
+  AGENTS.forEach(a => {
+    const defaultModel = DEFAULT_EXPERT_MODELS[a.id] || 'deepseek-chat';
+    const providerInfo = MODEL_PROVIDER_MAP[defaultModel] || {};
+    const provider = providerInfo.provider || 'deepseek';
+    html += '<div class="expert-agent-row" id="ear-' + a.id + '">';
+    html += `<span class="ea-emoji">${a.emoji}</span>`;
+    html += `<span class="ea-name">${a.name.slice(0, 6)}</span>`;
+    html += '<select id="expertModel_' + a.id + '" onchange="onExpertModelChange(\'' + a.id + '\')">';
+    for (const [group, models] of Object.entries(groups)) {
+      html += '<optgroup label="── ' + group + ' ──">';
+      models.forEach(m => {
+        const sel = m.v === defaultModel ? ' selected' : '';
+        html += '<option value="' + m.v + '"' + sel + '>' + m.t + '</option>';
+      });
+      html += '</optgroup>';
+    }
+    html += '</select>';
+    html += '<input type="password" class="ea-key" id="expertKey_' + a.id + '" placeholder="' + provider.toUpperCase() + ' Key" oninput="onApiKeyChange()">';
+    html += '<button class="ea-key-eye" onclick="toggleKeyVisibility(\'expertKey_' + a.id + '\', this)" tabindex="-1">?</button>';
+    html += '</div>';
+  });
+  container.innerHTML = html;
+  // Load any saved per-agent keys
+  loadExpertApiKeys();
+}
+
+function onExpertModelChange(agentId) {
+  const sel = document.getElementById('expertModel_' + agentId);
+  const keyInput = document.getElementById('expertKey_' + agentId);
+  if (!sel || !keyInput) return;
+  const model = sel.value;
+  const info = MODEL_PROVIDER_MAP[model];
+  if (info) {
+    keyInput.placeholder = info.provider.toUpperCase() + ' Key';
+  }
+  onApiKeyChange();
+}
+
+function getExpertApiKeys() {
+  const keys = {};
+  AGENTS.forEach(a => {
+    const el = document.getElementById('expertKey_' + a.id);
+    if (el && el.value.trim()) {
+      keys[a.id] = el.value.trim();
+    }
+  });
+  return keys;
+}
+
+function saveExpertApiKeys() {
+  const keys = getExpertApiKeys();
+  try { sessionStorage.setItem('expert_api_keys', JSON.stringify(keys)); } catch (e) {}
+}
+
+function loadExpertApiKeys() {
+  try {
+    const saved = sessionStorage.getItem('expert_api_keys');
+    if (saved) {
+      const keys = JSON.parse(saved);
+      Object.entries(keys).forEach(([agentId, key]) => {
+        const el = document.getElementById('expertKey_' + agentId);
+        if (el && key) el.value = key;
+      });
+    }
+  } catch (e) {}
+}
+
+function saveModeConfig() {
+  const config = {
+    mode: currentMode,
+    quickModel: document.getElementById('quickModelSelect')?.value || 'deepseek-v4-pro',
+    expertModels: {},
+  };
+  if (currentMode === 'expert') {
+    AGENTS.forEach(a => {
+      const sel = document.getElementById('expertModel_' + a.id);
+      if (sel) config.expertModels[a.id] = sel.value;
+    });
+  }
+  try { localStorage.setItem('deliberation_mode_config', JSON.stringify(config)); } catch (e) {}
+  saveApiKeys();
+}
+
+function loadModeConfig() {
+  try {
+    const saved = localStorage.getItem('deliberation_mode_config');
+    if (saved) {
+      const config = JSON.parse(saved);
+      if (config.mode) switchMode(config.mode);
+      if (config.quickModel) {
+        const qs = document.getElementById('quickModelSelect');
+        if (qs) qs.value = config.quickModel;
+      }
+      if (config.expertModels) {
+        Object.entries(config.expertModels).forEach(([id, model]) => {
+          const sel = document.getElementById('expertModel_' + id);
+          if (sel) sel.value = model;
+        });
+      }
+    }
+  } catch (e) {}
+  // Don't auto-load saved API keys (security + avoids stale key issues)
+  try { sessionStorage.removeItem('deliberation_api_keys'); } catch(e) {}
+  clearApiKeyFields();
+  updateModeHint();
+}
+
+// ============================================================
+// API INTEGRATION (backend SSE)
+// ============================================================
+async function startAPIDeliberation() {
+  const topic = document.getElementById('topicDisplay').textContent;
+  const mode = currentMode;
+  const quickModel = document.getElementById('quickModelSelect')?.value || 'deepseek-v4-pro';
+  const expertModels = {};
+  if (mode === 'expert') {
+    AGENTS.forEach(a => {
+      const sel = document.getElementById('expertModel_' + a.id);
+      if (sel) expertModels[a.id] = sel.value;
+    });
+  }
+
+  // UI already set up by startDeliberation()
+
+  try {
+    // Step 1: Initialize deliberation session
+    const apiKeys = mode === 'expert' ? {} : getApiKeys();
+    const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
+    const initResp = await fetch('/api/deliberation/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic, question: '',
+        deliberation_mode: mode,
+        quick_model: quickModel,
+        expert_models: expertModels,
+        api_keys: apiKeys,
+        expert_api_keys: expertApiKeys,
+      }),
+    });
+
+    if (!initResp.ok) throw new Error('API init error: ' + initResp.status);
+    const initData = await initResp.json();
+
+    // Show session info in status
+    const modelInfo = mode === 'quick' ? quickModel : (Object.values(expertModels)[0] || '多模型');
+    const sb = document.getElementById('statusBadge');
+    if (sb) { sb.textContent = '🔵 真实API ' + modelInfo; sb.className = 'status-badge running'; }
+
+    // Step 2: Stream deliberation via SSE
+    const response = await fetch('/api/deliberation/stream');
+    if (!response.ok) throw new Error('API stream error: ' + response.status);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (running) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            await handleEngineEvent(event);
+          } catch (e) { console.error('Event handler error:', e); }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('API deliberation error, falling back to embedded engine:', e);
+    var sb2 = document.getElementById('statusBadge');
+    if (sb2) { sb2.textContent = '⚠️ API失败，回退模拟模式'; sb2.className = 'status-badge running'; }
+    // Fallback to embedded engine
+    running = true;
+    const gen = runDeliberation(topic);
+    for await (const event of gen) {
+      if (!running) break;
+      await handleEngineEvent(event);
+    }
+  }
+
+  finishDeliberation();
 }
 
 // ============================================================
@@ -752,17 +2466,23 @@ document.getElementById('reportModal').addEventListener('click', e => {
   if (e.target === document.getElementById('reportModal'))
     document.getElementById('reportModal').classList.add('hidden');
 });
-
 document.querySelectorAll('.preset').forEach(b => {
   b.addEventListener('click', () => {
     document.getElementById('topicInput').value = b.dataset.topic;
   });
 });
 
-// Init display
-renderCharacters();
-renderSpeakerBars();
-updateProgress();
+// Listen for quick model changes to highlight API key
+document.getElementById('quickModelSelect')?.addEventListener('change', () => {
+  highlightActiveApiKey();
+  updateModeHint();
+});
+
+// Initialize
+buildExpertAgentList();
+loadModeConfig();
+renderSopBar();
+highlightActiveApiKey();
 </script>
 </body>
 </html>

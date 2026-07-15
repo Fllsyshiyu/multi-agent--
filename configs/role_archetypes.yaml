@@ -3,12 +3,20 @@
 #   Layer 1: Universal archetype (archetype_type, behavioral patterns)
 #   Layer 2: Topic-instantiated role (relationship_to_topic, main_interests, stance)
 #   Layer 3: Evidence constraints (can_say, cannot_say) - applied at runtime via evidence cards
+#   Layer 4: Message pool subscriptions — agents only see pools they subscribe to
+#     case_context    — 议题背景、约束、用户输入
+#     evidence_pool   — 已验证的数据和来源
+#     stakeholder_pool— 角色档案、立场陈述
+#     deliberation_pool—轮次摘要、冲突点
+#     proposal_pool   — 方案及修订历史
+#     review_pool     — 评估、校验、风险警报
 
 archetypes:
   - name: 摊贩
     agent_name: 夜市摊贩代表
     archetype_type: 直接受益者
     relationship_to_topic: 夜市是其主要收入来源，直接影响家庭生计
+    subscription_pools: [case_context, stakeholder_pool, proposal_pool]
     main_interests:
       - 保留经营机会
       - 获得稳定摊位
@@ -30,6 +38,7 @@ archetypes:
     agent_name: 周边居民代表
     archetype_type: 直接受影响者
     relationship_to_topic: 日常居住环境受夜市噪声、油烟、垃圾直接影响
+    subscription_pools: [case_context, stakeholder_pool, evidence_pool]
     main_interests:
       - 保障居住环境质量
       - 明确闭市时间和噪声管控
@@ -51,6 +60,7 @@ archetypes:
     agent_name: 夜间消费者代表
     archetype_type: 间接受益者
     relationship_to_topic: 夜市提供便利低价消费，是社区生活的一部分
+    subscription_pools: [case_context, stakeholder_pool, proposal_pool]
     main_interests:
       - 保留便利低价消费选择
       - 合理的营业时间
@@ -70,6 +80,7 @@ archetypes:
     agent_name: 街道办治理人员
     archetype_type: 治理方
     relationship_to_topic: 需要在居民投诉和摊贩生存之间找到可执行的治理方案
+    subscription_pools: [case_context, stakeholder_pool, proposal_pool, review_pool]
     main_interests:
       - 减少居民投诉
       - 维护公共秩序
@@ -90,6 +101,7 @@ archetypes:
     agent_name: 环卫人员代表
     archetype_type: 间接影响者
     relationship_to_topic: 夜市增加清扫工作量，但治理成本未被纳入讨论
+    subscription_pools: [case_context, stakeholder_pool, evidence_pool, deliberation_pool]
     main_interests:
       - 获得额外清扫经费
       - 合理配置垃圾桶和清运频次
@@ -111,6 +123,7 @@ archetypes:
     agent_name: 城市设计师
     archetype_type: 专业观察者
     relationship_to_topic: 作为第三方专家提供空间治理和试点方案的专业建议
+    subscription_pools: [case_context, evidence_pool, proposal_pool]
     main_interests:
       - 提出可量化可验证的试点方案
       - 引入国内外空间治理经验
