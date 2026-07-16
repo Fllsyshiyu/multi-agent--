@@ -26,6 +26,7 @@ from .artifacts import (
     Stance,
 )
 from .schemas import AgentCard
+from .protocols.speaker_scheduler import schedule_speakers
 
 
 # ── Inner Circle Selection ─────────────────────────────────────────────────
@@ -102,6 +103,15 @@ def get_outer_circle(
     """Get agents NOT in the inner circle."""
     inner_ids = {a.agent_id for a in inner}
     return [a for a in agents if a.agent_id not in inner_ids]
+
+
+def order_inner_circle_speakers(
+    inner: list[AgentCard],
+    speak_counts: dict[str, int] | None = None,
+    last_stance_sign: int | None = None,
+) -> list[AgentCard]:
+    """Expose the Robert/Fishbowl hybrid speaking order to both API modes."""
+    return schedule_speakers(inner, speak_counts, last_stance_sign)
 
 
 # ── Round Execution ────────────────────────────────────────────────────────
@@ -513,13 +523,15 @@ def run_all_fishbowl_rounds(
     round_summaries: list[RoundSummary] = []
     round_events: list[dict] = []
     prior_summary: RoundSummary | None = None
+    participants = [a for a in agents if a.archetype not in ("主持人", "评审员")]
 
     for r in range(max_rounds):
         round_no = r + 1
 
         # Select inner circle with quota
-        inner = select_inner_circle(agents, round_no, max_speakers, speak_counts)
-        outer = get_outer_circle(agents, inner)
+        inner = select_inner_circle(participants, round_no, max_speakers, speak_counts)
+        inner = order_inner_circle_speakers(inner, speak_counts)
+        outer = get_outer_circle(participants, inner)
 
         # Update speak counts
         for a in inner:

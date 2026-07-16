@@ -10,6 +10,7 @@ from .schemas import (
     ObserverMetrics,
     Utterance,
 )
+from .organizational_behavior import assess_group_dynamics
 
 
 def compute_metrics(state: DeliberationState) -> ObserverMetrics:
@@ -72,6 +73,16 @@ def compute_metrics(state: DeliberationState) -> ObserverMetrics:
 
     # 8. Anomaly flags
     metrics.anomaly_flags = _detect_anomalies(state, metrics)
+
+    # 8b. Organisational-behaviour signals (observable, non-diagnostic).
+    assessment = assess_group_dynamics(
+        [
+            {"speaker": u.speaker_name, "content": u.content, "evidence_ids": u.evidence_ids}
+            for u in state.history
+        ],
+        [a.agent_name for a in state.agents if a.archetype not in ("主持人", "评审员")],
+    )
+    metrics.anomaly_flags.extend(flag for flag in assessment.flags if flag not in metrics.anomaly_flags)
 
     # 9. Minority opinions
     metrics.minority_opinions = _extract_minority_opinions(state)

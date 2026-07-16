@@ -139,6 +139,7 @@ def _build_position_prompt(agent: AgentCard, context: dict, round_no: int) -> st
     case = context.get("case_context", {})
     prior = context.get("prior_summary")
     evidence = context.get("evidence", [])
+    protocol_context = context.get("protocol_context", "")
 
     evidence_text = ""
     if evidence:
@@ -179,6 +180,9 @@ def _build_position_prompt(agent: AgentCard, context: dict, round_no: int) -> st
 {case.get('topic', '')}
 核心问题：{case.get('question', '')}
 {prior_text}
+
+## 当前程序状态
+{protocol_context if protocol_context else '遵循主持人指定的当前议题；一次只讨论一个待决事项。'}
 
 ## 可用证据
 {evidence_text if evidence_text else '（无专属证据）'}

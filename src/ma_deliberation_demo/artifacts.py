@@ -26,6 +26,25 @@ class ArtifactStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class MotionType(str, Enum):
+    """The small, deliberation-oriented subset of Robert's Rules we support."""
+    MAIN = "main_motion"
+    AMENDMENT = "amendment"
+    PROCEDURAL = "procedural"
+    INFORMATION = "information_request"
+
+
+class MotionStatus(str, Enum):
+    DRAFT = "draft"
+    AWAITING_SECOND = "awaiting_second"
+    DEBATE_OPEN = "debate_open"
+    AMENDMENT_PENDING = "amendment_pending"
+    VOTING = "voting"
+    ADOPTED = "adopted"
+    REJECTED = "rejected"
+    WITHDRAWN = "withdrawn"
+
+
 class RoleType(str, Enum):
     RESIDENT = "resident"
     VULNERABLE_GROUP = "vulnerable_group"
@@ -339,3 +358,52 @@ class GateCheckResult:
     required_action: list[str] = field(default_factory=list)
     artifact_id: str = ""
     produced_by: str = ""
+
+
+# ── 15. Procedural artifacts (Robert's Rules adapted for deliberation) ─────
+
+@dataclass
+class Motion:
+    """A traceable matter placed before the deliberation.
+
+    A second means the matter deserves discussion, not that the seconder
+    supports it.  The runtime, rather than an LLM, controls status changes.
+    """
+    motion_id: str = ""
+    motion_type: MotionType = MotionType.MAIN
+    proposer_id: str = ""
+    proposer_name: str = ""
+    content: str = ""
+    status: MotionStatus = MotionStatus.DRAFT
+    parent_motion_id: str | None = None
+    seconded_by: str | None = None
+    seconded_by_name: str | None = None
+    rationale: str = ""
+    round_id: int = 0
+    votes: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ProceduralEvent:
+    """Append-only audit record for a procedural decision."""
+    event_id: str = ""
+    action: str = ""
+    actor_id: str = ""
+    actor_name: str = ""
+    target_id: str = ""
+    result: str = "accepted"  # accepted | rejected | noted
+    reason: str = ""
+    stage_id: str = ""
+    round_id: int = 0
+
+
+@dataclass
+class CommitmentCard:
+    """Separates textual agreement from willingness to execute a proposal."""
+    agent_id: str = ""
+    agent_name: str = ""
+    proposal_id: str = ""
+    acceptance: str = "conditional"  # support | conditional | oppose
+    conditions: list[str] = field(default_factory=list)
+    willing_to_execute: bool = False
+    execution_risk: str = ""

@@ -1143,7 +1143,7 @@ async function* runDeliberation(topic) {
 // ============================================================
 let running = false;
 let timer = null;
-let collectedData = { agents:[], fishbowl:[], dialogue:[], summaries:[], conflict:null, proposal:null, review:null, validation:null, currentRound:0, speakCounts:{}, deliberationPlans:[], outerObservations:[], observerSnapshots:[], gateResults:[], reviewCards:[], executiveSummary:'', recommendations:[] };
+let collectedData = { agents:[], fishbowl:[], dialogue:[], summaries:[], conflict:null, proposal:null, review:null, validation:null, currentRound:0, speakCounts:{}, deliberationPlans:[], outerObservations:[], observerSnapshots:[], gateResults:[], reviewCards:[], proceduralEvents:[], protocol:null, executiveSummary:'', recommendations:[] };
 
 // ============================================================
 // UI: SOP BAR
@@ -1471,7 +1471,9 @@ function renderObserverSnapshot(snap) {
     '<div>speaker: ' + (shares || 'N/A') + '</div>' +
     '<div>evidence-rate: ' + Math.round((snap.grounding_rate || 0) * 100) + '%</div>' +
     '<div>minority-retention: ' + Math.round((snap.minority_retention || 0) * 100) + '%</div>' +
-    '<div>boundary-violations: ' + (snap.role_boundary_violations || 0) + '</div></div>' +
+    '<div>boundary-violations: ' + (snap.role_boundary_violations || 0) + '</div>' +
+    (snap.behavior ? '<div>groupthink-risk: ' + Math.round((snap.behavior.groupthink_risk || 0) * 100) + '% · safety-risk: ' + Math.round((snap.behavior.psychological_safety_risk || 0) * 100) + '%</div>' : '') +
+    '</div>' +
     ((snap.anomaly_flags || []).length ? '<div style="font-size:9px;color:var(--warn)">flags: ' + snap.anomaly_flags.join('; ') + '</div>' : '');
   addToStage(el);
 }
@@ -1484,6 +1486,38 @@ function renderGateResult(gate) {
   el.innerHTML = '<strong>' + si + ' ' + (gate.gate_name || 'Gate') + '</strong>' +
     ((gate.issues || []).length ? '<div style="color:var(--dim);margin:2px 0">' + gate.issues.map(function(i){return '&middot; ' + i;}).join('<br>') + '</div>' : '') +
     ((gate.required_action || []).length ? '<div style="color:var(--accent);font-size:9px">action: ' + gate.required_action.join('; ') + '</div>' : '');
+  addToStage(el);
+}
+
+function renderProtocolState(protocol) {
+  collectedData.protocol = protocol;
+  var el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--accent)';
+  el.innerHTML = '<div class="rs-hd" style="color:var(--accent)">⚖️ 程序状态 — ' + (protocol.status || 'idle') + '</div>' +
+    '<div style="font-size:10px;color:var(--text);margin:4px 0">待决事项：' + (protocol.motion || '暂无') + '</div>' +
+    '<div style="font-size:9px;color:var(--dim)">' + (protocol.notice || '模拟程序记录') + '</div>';
+  addToStage(el);
+}
+
+function renderProceduralEvent(event) {
+  collectedData.proceduralEvents.push(event);
+  var color = event.result === 'accepted' ? 'var(--ok)' : event.result === 'rejected' ? 'var(--err)' : 'var(--warn)';
+  var el = document.createElement('div');
+  el.style.cssText = 'padding:6px 12px;margin:3px 0;border-radius:6px;font-size:10px;background:rgba(255,255,255,.03);border-left:3px solid ' + color;
+  el.innerHTML = '<strong>⚖️ ' + (event.action || 'procedure') + '</strong> · ' + (event.actor_name || '系统') +
+    '<div style="color:var(--dim);margin-top:2px">' + (event.reason || '') + '</div>';
+  addToStage(el);
+}
+
+function renderBehaviorAssessment(assessment) {
+  var el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--warn)';
+  el.innerHTML = '<div class="rs-hd" style="color:var(--warn)">🧭 组织行为观察</div>' +
+    '<div style="font-size:10px;color:var(--dim)">发言支配：' + Math.round((assessment.speaker_dominance || 0) * 100) + '% · 群体迷思风险：' + Math.round((assessment.groupthink_risk || 0) * 100) + '%</div>' +
+    ((assessment.flags || []).length ? '<div style="font-size:9px;color:var(--warn);margin-top:3px">' + assessment.flags.join('；') + '</div>' : '') +
+    ((assessment.interventions || []).length ? '<div style="font-size:9px;color:var(--accent);margin-top:3px">主持干预：' + assessment.interventions.join('；') + '</div>' : '');
   addToStage(el);
 }
 
@@ -1831,6 +1865,18 @@ async function handleEngineEvent(event) {
       collectedData.observerSnapshots.push(event.snapshot);
       renderObserverSnapshot(event.snapshot);
       await new Promise(r => { timer = setTimeout(r, 200); });
+      break;
+
+    case 'protocol_state':
+      renderProtocolState(event);
+      break;
+
+    case 'procedural_event':
+      renderProceduralEvent(event);
+      break;
+
+    case 'behavior_assessment':
+      renderBehaviorAssessment(event);
       break;
 
     case 'gate_result':

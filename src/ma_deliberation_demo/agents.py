@@ -240,7 +240,13 @@ def generate_agent_contract(agent: AgentCard, stage_id: str = "S3") -> AgentCont
     )
 
 
-def get_agent_prompt(agent: AgentCard, topic: str, question: str, evidence_cards: list | None = None) -> str:
+def get_agent_prompt(
+    agent: AgentCard,
+    topic: str,
+    question: str,
+    evidence_cards: list | None = None,
+    protocol_context: str = "",
+) -> str:
     """Build the system prompt for an agent during deliberation.
 
     The prompt is composed of:
@@ -298,6 +304,14 @@ def get_agent_prompt(agent: AgentCard, topic: str, question: str, evidence_cards
 4. 保持角色一致性，不要偏离你的身份立场
 5. 可以提出条件性方案，不要说"我同意所有人的意见"
 6. 保留至少一个不可退让的底线""")
+
+    if protocol_context:
+        prompt_parts.append(f"""
+
+## 当前议事程序（由系统强制执行）
+{protocol_context}
+
+你可以提出结构化建议、修正或澄清，但不得假定自己拥有程序裁决权。附议仅表示事项值得讨论，不等于赞成。即使多数倾向一致，也必须保留少数意见和未解决风险。""")
 
     if evidence_cards:
         from .evidence import format_evidence_context

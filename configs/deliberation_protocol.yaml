@@ -1,0 +1,17 @@
+# Robert's Rules adapted for a simulated public-governance deliberation.
+# This is a procedure configuration, not a claim of legal parliamentary authority.
+protocol: roberts_fishbowl_hybrid
+require_second_for_main_motion: true
+max_amendment_depth: 2
+speaking:
+  prioritize_first_time_speakers: true
+  alternate_opposing_viewpoints: true
+  max_consecutive_turns: 1
+  max_words_per_speech: 400
+closing_gate:
+  require_minority_retention: true
+  require_evidence_readiness: true
+voting:
+  facilitators_vote: false
+  quorum_fraction: 0.5
+  label: "模拟角色偏好，不构成真实公共授权"

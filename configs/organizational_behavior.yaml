@@ -1,0 +1,9 @@
+# Observable safeguards. These signals trigger facilitation, not psychological diagnosis.
+speaker_dominance_threshold: 0.35
+minimum_grounding_rate: 0.30
+require_minority_response_before_closure: true
+interventions:
+  groupthink: "要求每位参与者提出一个失败条件或尚未满足的底线"
+  dominance: "优先邀请低参与度或沉默利益方"
+  psychological_safety: "将人身评价重述为对主张、证据和后果的讨论"
+  information_sharing: "列出关键主张尚缺的证据和数据来源"

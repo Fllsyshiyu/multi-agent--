@@ -51,6 +51,19 @@ def check_utterance(utterance: Utterance, agent: AgentCard) -> tuple[bool, str]:
     return True, ""
 
 
+def check_interaction_norms(content: str) -> tuple[bool, str]:
+    """Reject clear relationship-conflict language while preserving disagreement.
+
+    This intentionally catches only explicit harmful phrasing. Semantic
+    disagreement and criticism of a proposal remain legitimate task conflict.
+    """
+    prohibited = ["闭嘴", "不配发言", "你们根本不懂", "你就是自私", "无知的人"]
+    for phrase in prohibited:
+        if phrase in content:
+            return False, f"互动规范提醒：检测到“{phrase}”，请改为针对主张、证据或后果的表达"
+    return True, ""
+
+
 def _extract_keywords(text: str) -> list[str]:
     """Extract meaningful keywords from a boundary description."""
     # Remove common negation prefixes
