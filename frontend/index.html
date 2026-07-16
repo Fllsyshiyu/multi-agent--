@@ -2374,20 +2374,18 @@ async function startAPIDeliberation() {
   const sb = document.getElementById('statusBadge');
   if (sb) { sb.textContent = '⏳ 发起议事请求...'; sb.className = 'status-badge running'; }
 
-  // Send to Python backend in-process via Streamlit component messaging
-  window.parent.postMessage({
-    isStreamlitMessage: true,
-    type: 'streamlit:setComponentValue',
-    data: {
-      _st_action: 'run_deliberation',
-      topic: topic,
-      mode: mode,
-      quick_model: quickModel,
-      expert_models: expertModels,
-      api_keys: apiKeys,
-      expert_api_keys: expertApiKeys,
-    }
-  }, '*');
+  // Navigate parent to trigger Streamlit rerun with query params
+  var payload = JSON.stringify({
+    _st_action: 'run_deliberation',
+    topic: topic,
+    mode: mode,
+    quick_model: quickModel,
+    expert_models: expertModels,
+    api_keys: apiKeys,
+    expert_api_keys: expertApiKeys,
+  });
+  var parentUrl = window.parent.location.href.split('?')[0];
+  window.parent.location.href = parentUrl + '?_st_payload=' + encodeURIComponent(payload);
   // The page will reload when results are ready (via st.rerun)
 }
 

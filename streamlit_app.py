@@ -77,23 +77,30 @@ if "deliberation_result" in st.session_state and st.session_state.deliberation_r
     st.session_state.deliberation_result = None
 
 # ── 渲染组件 ──────────────────────────────────────────────
-component_result = st.components.v1.html(
+st.components.v1.html(
     html_content,
     height=1080,
     scrolling=True,
 )
 
-# ── 处理前端发来的议事请求 ──────────────────────────────────
-if component_result and isinstance(component_result, dict):
-    if component_result.get("_st_action") == "run_deliberation":
+# ── 处理前端发来的议事请求（通过 URL query param）────────────
+_payload_raw = st.query_params.get("_st_payload", "")
+if _payload_raw:
+    try:
+        payload = json.loads(_payload_raw)
+    except json.JSONDecodeError:
+        payload = {}
+    st.query_params.clear()
+
+    if payload.get("_st_action") == "run_deliberation":
         with st.spinner("🤖 多智能体议事进行中，请稍候..."):
             result = _run_deliberation_in_process(
-                component_result.get("topic", ""),
-                component_result.get("mode", "quick"),
-                component_result.get("quick_model", "deepseek-v4-pro"),
-                component_result.get("expert_models", {}),
-                component_result.get("api_keys", {}),
-                component_result.get("expert_api_keys", {}),
+                payload.get("topic", ""),
+                payload.get("mode", "quick"),
+                payload.get("quick_model", "deepseek-v4-pro"),
+                payload.get("expert_models", {}),
+                payload.get("api_keys", {}),
+                payload.get("expert_api_keys", {}),
             )
         st.session_state.deliberation_result = result
         st.rerun()
