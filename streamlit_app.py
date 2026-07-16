@@ -2,16 +2,16 @@
 多智能体议事厅 · Streamlit 版
 Multi-Agent Deliberation System — streamlit_app.py
 
-
 部署到 Streamlit Community Cloud 时，Streamlit 会自动运行此文件。
 """
 
 import streamlit as st
 from pathlib import Path
-import subprocess
-import sys
+import threading
+import asyncio
+import time
 import os
-import atexit
+import sys
 
 # ── 页面配置 ──────────────────────────────────────────────
 st.set_page_config(
@@ -21,33 +21,44 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── 环境检测 ──────────────────────────────────────────────────
-_is_streamlit_cloud = bool(
-    os.environ.get("STREAMLIT_RUNTIME_VERSION")
-    or os.environ.get("STREAMLIT_CLOUD", "")
-)
+# ── 环境检测（多重判断）────────────────────────────────────────
+_CLOUD_DETECTED = any([
+    os.environ.get("STREAMLIT_SERVER_PORT"),
+    os.environ.get("STREAMLIT_RUNTIME_VERSION"),
+    os.environ.get("STREAMLIT_CLOUD"),
+    os.environ.get("STREAMLIT_APP_URL"),
+    os.path.exists("/.dockerenv"),
+])
+_CLOUD_URL = os.environ.get("STREAMLIT_APP_URL") or "https://multi-agent-yishi.streamlit.app"
 
-# ── 启动 FastAPI 后端（子进程）─────────────────────────────────
+# ── 启动 FastAPI 后端（线程 + asyncio）──────────────────────────
+_API_HOST = "127.0.0.1"
 _API_PORT = 8765
-_backend_proc = None
 
 def _start_fastapi_backend():
-    """用 subprocess 启动 FastAPI，比 threading 更可靠。"""
-    global _backend_proc
-    api_main = Path(__file__).parent / "api" / "main.py"
-    _backend_proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "api.main:app",
-         "--host", "127.0.0.1", "--port", str(_API_PORT), "--log-level", "warning"],
-        cwd=str(Path(__file__).parent),
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    atexit.register(lambda: _backend_proc and _backend_proc.terminate())
+    """在 daemon 线程中启动 uvicorn（asyncio + threading）。"""
+    import uvicorn
+    sys.path.insert(0, str(Path(__file__).parent))
 
-_start_fastapi_backend()
+    def _serve():
+        from api.main import app as fastapi_app
+        cfg = uvicorn.Config(fastapi_app, host=_API_HOST, port=_API_PORT, log_level="warning")
+        srv = uvicorn.Server(cfg)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(srv.serve())
 
-# ── 注册 API 代理到 Tornado ──────────────────────────────────
+    t = threading.Thread(target=_serve, daemon=True)
+    t.start()
+    time.sleep(2)  # give uvicorn a moment to bind
+
+try:
+    _start_fastapi_backend()
+except Exception:
+    pass  # backend might already be running on reload
+
+# ── 注册 API 代理到 Tornado（用 IOLoop callback 延迟注册）────────
 def _register_api_proxy():
-    """通过 Tornado IOLoop 注册 /api/ 代理路由，延迟到 server 就绪后执行。"""
     def _patch():
         import requests as _req
         from streamlit.web.server import Server
@@ -59,40 +70,34 @@ def _register_api_proxy():
 
         class APIProxy(tornado.web.RequestHandler):
             def _do_proxy(self):
-                target = f"http://127.0.0.1:{_API_PORT}{self.request.uri}"
-                headers = {}
-                for k in self.request.headers:
-                    kl = k.lower()
-                    if kl not in ("host", "content-length", "connection"):
-                        headers[k] = self.request.headers[k]
-                method = self.request.method
-                body = self.request.body if method in ("POST", "PUT", "PATCH") else None
+                target = f"http://{_API_HOST}:{_API_PORT}{self.request.uri}"
+                hdrs = {k: v for k, v in self.request.headers.get_all()
+                       if k.lower() not in ("host","content-length","connection")}
                 try:
-                    resp = _req.request(method, target, headers=headers,
-                                       data=body, stream=True, timeout=300)
+                    resp = _req.request(
+                        self.request.method, target,
+                        headers=hdrs, data=self.request.body or None,
+                        timeout=300,
+                    )
                     self.set_status(resp.status_code)
                     for k, v in resp.headers.items():
-                        kl = k.lower()
-                        if kl not in ("content-length", "transfer-encoding", "connection"):
+                        if k.lower() not in ("content-length","transfer-encoding","connection"):
                             self.set_header(k, v)
                     self.write(resp.content)
                 except Exception:
                     self.set_status(502)
                     self.write(b'{"error":"backend unreachable"}')
 
-            get = _do_proxy
-            post = _do_proxy
-            put = _do_proxy
-            delete = _do_proxy
-            patch = _do_proxy
-            options = _do_proxy
+            get = post = put = delete = patch = options = _do_proxy
 
-        # Only add if not already registered
         app.add_handlers(r".*", [(r"/api/.*", APIProxy)])
-        print("[proxy] API routes registered", flush=True)
+        print("[proxy] registered", flush=True)
 
-    import tornado.ioloop
-    tornado.ioloop.IOLoop.current().add_callback(_patch)
+    try:
+        import tornado.ioloop
+        tornado.ioloop.IOLoop.current().add_callback(_patch)
+    except Exception:
+        pass
 
 _register_api_proxy()
 
@@ -105,20 +110,37 @@ if not HTML_PATH.exists():
 
 html_content = HTML_PATH.read_text(encoding="utf-8")
 
-# ── 注入 API 基础路径（Python 端直接决定，不依赖浏览器检测）─────
-if _is_streamlit_cloud:
-    # Sandboxed iframe can't detect parent origin via JS.
-    # Inject <base> tag so ALL relative URLs resolve to the cloud origin.
-    _cloud_url = "https://multi-agent-yishi.streamlit.app"
-    _base_tag = f'<base href="{_cloud_url}/">'
-    _api_script = """<script>window.API_BASE='';</script>"""
-    html_content = html_content.replace("<head>", f"<head>\n{_base_tag}\n{_api_script}", 1)
+# ── 注入诊断 + API 基础路径 ──────────────────────────────────
+_diag = {
+    "cloud_detected": _CLOUD_DETECTED,
+    "cloud_url": _CLOUD_URL,
+    "api_host": _API_HOST, "api_port": _API_PORT,
+}
+_diag_json = __import__("json").dumps(_diag)
+
+if _CLOUD_DETECTED:
+    _injection = f"""<base href="{_CLOUD_URL}/">
+<script>
+window.API_BASE='';
+window.__DIAG={_diag_json};
+console.log('[init] CLOUD mode | base=',document.querySelector('base')?.href,'| diag=',window.__DIAG);
+</script>"""
 else:
-    _api_script = """<script>window.API_BASE='http://localhost:8765';</script>"""
-    if "</head>" in html_content:
-        html_content = html_content.replace("</head>", _api_script + "\n</head>", 1)
-    else:
-        html_content = _api_script + html_content
+    _injection = f"""<script>
+window.API_BASE='http://localhost:8765';
+window.__DIAG={_diag_json};
+console.log('[init] LOCAL mode | API_BASE=',window.API_BASE,'| diag=',window.__DIAG);
+</script>"""
+
+if "</head>" in html_content:
+    html_content = html_content.replace("</head>", _injection + "\n</head>", 1)
+else:
+    html_content = _injection + html_content
+
+# ── 诊断横幅（仅开发用，云端可看到 env 状态）───────────────────
+if _CLOUD_DETECTED:
+    _diag_banner = f'<!-- DIAG: CLOUD=True url={_CLOUD_URL} port={_API_PORT} -->'
+    html_content = _diag_banner + html_content
 
 # 全屏渲染 HTML
 st.components.v1.html(
