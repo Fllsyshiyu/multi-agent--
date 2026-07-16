@@ -77,11 +77,8 @@ if "deliberation_result" in st.session_state and st.session_state.deliberation_r
     st.session_state.deliberation_result = None
 
 # ── 渲染组件 ──────────────────────────────────────────────
-st.components.v1.html(
-    html_content,
-    height=1080,
-    scrolling=True,
-)
+# Render HTML inline — no iframe, no sandbox, JS runs in page context
+st.html(html_content)
 
 # ── 处理前端发来的议事请求（通过 URL query param）────────────
 _payload_raw = st.query_params.get("_st_payload", "")
