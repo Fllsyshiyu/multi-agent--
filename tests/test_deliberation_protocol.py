@@ -4,6 +4,8 @@ from ma_deliberation_demo.procedural_validators import gate_procedural_readiness
 from ma_deliberation_demo.protocols import ProtocolRuntime
 from ma_deliberation_demo.protocols.speaker_scheduler import schedule_speakers
 from ma_deliberation_demo.schemas import AgentCard
+from ma_deliberation_demo.agents import generate_agents, load_archetypes
+from ma_deliberation_demo.topic import analyze_topic
 import asyncio
 
 
@@ -40,6 +42,24 @@ def test_amendment_precedes_main_motion_and_closure_needs_minority_and_evidence(
     assert runtime.current_motion.status == MotionStatus.DEBATE_OPEN
     assert runtime.close_debate(amender, minority_retained=True, evidence_ready=True)
     assert runtime.current_motion.status == MotionStatus.VOTING
+
+
+def test_adopted_amendment_updates_parent_and_returns_to_main_motion():
+    proposer, seconder, amender = agent("p", 0.8), agent("s", -0.7), agent("a", 0.1)
+    runtime = ProtocolRuntime()
+    main = runtime.open_main_motion("主议案", proposer)
+    runtime.second_current_motion(seconder)
+    amendment = runtime.propose_amendment("增加环卫经费条款", amender)
+    assert amendment is not None
+    runtime.second_current_motion(seconder)
+    runtime.close_debate(amender, minority_retained=True, evidence_ready=True)
+    runtime.record_vote(proposer, "support")
+    runtime.record_vote(seconder, "support")
+
+    assert runtime.finalise_vote([proposer, seconder, amender], amender) == "amendment_adopted"
+    assert runtime.current_motion is main
+    assert main.status == MotionStatus.DEBATE_OPEN
+    assert "增加环卫经费条款" in main.content
 
 
 def test_speaker_scheduler_prioritises_low_participation_and_alternates_positions():
@@ -84,15 +104,24 @@ def test_api_session_registers_a_debating_motion():
     assert "条件化治理建议" in result["protocol"]["current_motion"]
 
 
+def test_agent_ids_are_deterministic_for_the_same_topic():
+    analysis = analyze_topic("小区门口夜市是否应该保留？")
+    first = generate_agents("小区门口夜市是否应该保留？", analysis, load_archetypes())
+    second = generate_agents("小区门口夜市是否应该保留？", analysis, load_archetypes())
+
+    assert [(a.agent_id, a.agent_name) for a in first] == [(a.agent_id, a.agent_name) for a in second]
+
+
 def test_simulation_stream_emits_protocol_and_behavior_events():
     import api.main as api
 
     async def collect():
-        await api.start_deliberation(api.DeliberationRequest(topic="小区门口夜市是否应该保留？"))
+        await api.start_deliberation(api.DeliberationRequest(topic="小区门口夜市是否应该保留？", max_rounds=1, max_speakers=3))
         return [item async for item in api._stream_sop()]
 
     events = asyncio.run(collect())
 
     assert any("procedural_event" in event for event in events)
     assert any("behavior_assessment" in event for event in events)
+    assert sum("round_summary" in event for event in events) == 1
     assert events[-1] == "data: [DONE]\n\n"

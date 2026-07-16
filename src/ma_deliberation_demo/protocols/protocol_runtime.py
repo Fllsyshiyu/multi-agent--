@@ -125,6 +125,25 @@ class ProtocolRuntime:
         result = "adopted" if cast.count("support") > cast.count("oppose") else "rejected"
         motion.status = MotionStatus.ADOPTED if result == "adopted" else MotionStatus.REJECTED
         self._record("finalise_vote", actor, motion.motion_id, "accepted", f"模拟偏好结果：{result}；不构成真实公共授权", round_id)
+
+        # A resolved amendment must change the parent matter and return the
+        # meeting to that matter. Leaving the amendment on the stack would
+        # make a successful amendment invisible to subsequent deliberation.
+        if motion.motion_type == MotionType.AMENDMENT and motion.parent_motion_id:
+            parent = self.motions.get(motion.parent_motion_id)
+            if parent:
+                if result == "adopted":
+                    parent.adopted_amendments.append(motion.content)
+                    parent.content = f"{parent.content}\n已采纳修正：{motion.content}"
+                if self.motion_stack and self.motion_stack[-1] == motion.motion_id:
+                    self.motion_stack.pop()
+                parent.status = MotionStatus.DEBATE_OPEN
+                self._record(
+                    "resolve_amendment", actor, parent.motion_id, "accepted",
+                    "修正案已采纳并回写主议案，恢复主议案讨论" if result == "adopted" else "修正案未通过，恢复主议案讨论",
+                    round_id,
+                )
+                return f"amendment_{result}"
         return result
 
     def context_for_agent(self, agent: AgentCard) -> str:

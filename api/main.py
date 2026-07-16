@@ -166,6 +166,8 @@ async def start_deliberation(req: DeliberationRequest):
         "expert_models": req.expert_models,
         "api_keys": req.api_keys,
         "expert_api_keys": req.expert_api_keys,
+        "max_rounds": max(1, min(req.max_rounds, 4)),
+        "max_speakers": max(2, min(req.max_speakers, 6)),
     }
 
     _topic_analysis = analyze_topic(req.topic)
@@ -244,7 +246,8 @@ async def start_deliberation(req: DeliberationRequest):
             }
             for a in agents
         ],
-        "max_rounds": req.max_rounds,
+        "max_rounds": _deliberation_config["max_rounds"],
+        "max_speakers": _deliberation_config["max_speakers"],
         "deliberation_mode": req.deliberation_mode,
         "protocol": {
             "current_motion": motion.content if motion else "",
@@ -505,26 +508,10 @@ async def _run_fishbowl_llm(
     speak_counts = {a.agent_id: 0 for a in agents}
 
     for round_no in range(1, max_rounds + 1):
-        # Select inner/outer circle
-        if round_no == 1:
-            inner = [a for a in stakeholders if a.agent_id in ('agent_000', 'agent_001', 'agent_004', 'agent_005')]
-            outer = [a for a in stakeholders if a.agent_id in ('agent_002', 'agent_003')]
-        else:
-            inner = [a for a in stakeholders if a.agent_id in ('agent_002', 'agent_003', 'agent_000', 'agent_001')]
-            outer = [a for a in stakeholders if a.agent_id in ('agent_004', 'agent_005')]
-
-        # If inner/outer empty from ID mismatch, fall back to index-based
-        if not inner:
-            mid = len(stakeholders) // 2
-            if round_no == 1:
-                inner = stakeholders[:max_speakers]
-                outer = stakeholders[max_speakers:]
-            else:
-                inner = stakeholders[mid:mid + max_speakers]
-                outer = stakeholders[:mid] + stakeholders[mid + max_speakers:]
-
-        inner = inner[:max_speakers]
-        outer = outer[:len(stakeholders) - max_speakers]
+        # Use quota- and participation-aware selection rather than unstable
+        # generated IDs. This also rotates lower-participation roles in later rounds.
+        inner = select_inner_circle(stakeholders, round_no, max_speakers, speak_counts)
+        outer = get_outer_circle(stakeholders, inner)
         inner = order_inner_circle_speakers(inner, speak_counts)
 
         yield {"type": "fishbowl_update", "inner": [_agent_to_event_dict(a) for a in inner],
@@ -665,10 +652,15 @@ async def _run_fishbowl_llm(
 
             yield {"type": "speech", "agent": _agent_to_event_dict(speaker),
                    "text": speech_text, "roundNo": round_no, "isFacilitator": False,
-                   "llm_model": speaker_model, "llm_success": speaker_llm_success}
+                   "llm_model": speaker_model, "llm_success": speaker_llm_success,
+                   "stance": stance_val, "evidence_ids": parsed.get("evidence_ids", []),
+                   "procedural_action": parsed.get("procedural_action", "speak")}
             speak_counts[speaker.agent_id] = speak_counts.get(speaker.agent_id, 0) + 1
             spoken_in_round.append(speaker.agent_id)
-            conversation_history.append({"speaker": speaker.agent_name, "content": speech_text})
+            conversation_history.append({
+                "speaker": speaker.agent_name, "content": speech_text,
+                "evidence_ids": parsed.get("evidence_ids", []), "stance": stance_val,
+            })
 
             # LLMs may propose a procedural action, but the protocol runtime
             # is the sole authority on whether it is legal and what it changes.
@@ -788,7 +780,10 @@ async def _run_fishbowl_llm(
         # ── S8: Observer Snapshot ──
         utterances = []
         for h in conversation_history:
-            utterances.append({"speaker": h.get("speaker", ""), "content": h.get("content", "")})
+            utterances.append({
+                "speaker": h.get("speaker", ""), "content": h.get("content", ""),
+                "evidence_ids": h.get("evidence_ids", []),
+            })
         snapshot = compute_observer_snapshot(utterances, agents, round_no)
         behavior = assess_group_dynamics(utterances, [a.agent_name for a in inner])
         snapshot.anomaly_flags.extend(flag for flag in behavior.flags if flag not in snapshot.anomaly_flags)
@@ -975,6 +970,8 @@ async def _stream_sop():
     deliberation_mode = _deliberation_config.get("deliberation_mode", "quick")
     quick_model = _deliberation_config.get("quick_model", "claude-sonnet-4-6")
     expert_models = _deliberation_config.get("expert_models", {})
+    max_rounds = _deliberation_config.get("max_rounds", 2)
+    max_speakers = _deliberation_config.get("max_speakers", 4)
 
     try:
         # Signal API mode to frontend
@@ -1077,8 +1074,8 @@ async def _stream_sop():
                 question=question,
                 evidence_pool=_evidence_pool,
                 agent_llms=agent_llms,
-                max_rounds=2,
-                max_speakers=4,
+                max_rounds=max_rounds,
+                max_speakers=max_speakers,
                 protocol_runtime=_protocol_runtime,
             ):
                 yield _sse(event["type"], {k: v for k, v in event.items() if k != "type"})
@@ -1105,6 +1102,8 @@ async def _stream_sop():
                         "text": event.get("text", ""),
                         "round_no": event.get("roundNo", 1),
                         "isFacilitator": event.get("isFacilitator", False),
+                        "evidence_ids": event.get("evidence_ids", []),
+                        "stance": event.get("stance"),
                     })
                     speak_counts[agent_id] = speak_counts.get(agent_id, 0) + 1
                     if not event.get("isFacilitator"):
@@ -1113,16 +1112,23 @@ async def _stream_sop():
                             all_cards.append(PositionCard(
                                 agent_id=agent.agent_id,
                                 stakeholder_group=agent.archetype,
-                                stance=Stance.NEUTRAL,
+                                stance=(
+                                    Stance.SUPPORT if event.get("stance", 0) > 0.3 else
+                                    Stance.CONDITIONAL_SUPPORT if event.get("stance", 0) > 0.0 else
+                                    Stance.OPPOSE if event.get("stance", 0) < -0.3 else
+                                    Stance.CONDITIONAL_OPPOSE if event.get("stance", 0) < 0.0 else
+                                    Stance.NEUTRAL
+                                ),
                                 claims=[event.get("text", "")[:100]],
+                                evidence_ids=event.get("evidence_ids", []),
                                 round_no=event.get("roundNo", 1),
                             ))
         else:
             # Fallback to simulation
             all_cards, round_summaries, fishbowl_events = run_all_fishbowl_rounds(
                 agents=agents,
-                max_rounds=2,
-                max_speakers=4,
+                max_rounds=max_rounds,
+                max_speakers=max_speakers,
             )
             # Keep downstream reporting schema identical to the LLM path.
             all_dialogue = [
@@ -1315,10 +1321,17 @@ async def _stream_sop():
                     round_id=len(round_summaries),
                 )
                 if _protocol_runtime.current_motion and _protocol_runtime.current_motion.status == "voting":
+                    latest_cards = {card.agent_id: card for card in all_cards}
                     for agent in agents:
                         if agent.archetype in ("主持人", "评审员"):
                             continue
-                        vote = "support" if agent.stance_score > 0.15 else ("oppose" if agent.stance_score < -0.15 else "abstain")
+                        card = latest_cards.get(agent.agent_id)
+                        stance = card.stance if card else Stance.NEUTRAL
+                        vote = (
+                            "support" if stance in (Stance.SUPPORT, Stance.CONDITIONAL_SUPPORT) else
+                            "oppose" if stance in (Stance.OPPOSE, Stance.CONDITIONAL_OPPOSE) else
+                            "abstain"
+                        )
                         _protocol_runtime.record_vote(agent, vote, len(round_summaries))
                     _protocol_runtime.finalise_vote(agents, host_agent, len(round_summaries))
                 for procedural_event in _protocol_runtime.events[start:]:

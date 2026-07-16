@@ -381,6 +381,7 @@ class Motion:
     rationale: str = ""
     round_id: int = 0
     votes: dict[str, str] = field(default_factory=dict)
+    adopted_amendments: list[str] = field(default_factory=list)
 
 
 @dataclass

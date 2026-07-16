@@ -64,10 +64,14 @@ def generate_agents(topic: str, topic_analysis: TopicAnalysis, archetypes: dict 
     agents = []
 
     # Map conflict parties to archetypes
-    all_parties = set()
+    # Preserve the conflict-axis order. A set here previously made agent IDs
+    # depend on hash iteration order, which in turn broke deterministic
+    # Fishbowl rotation and any ID-based audit trail.
+    all_parties: list[str] = []
     for axis in topic_analysis.conflict_axes:
         for party in axis.parties:
-            all_parties.add(party)
+            if party not in all_parties:
+                all_parties.append(party)
 
     archetype_list = archetypes.get("archetypes", [])
     archetype_by_name = {a.get("name", ""): a for a in archetype_list}
