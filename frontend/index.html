@@ -1650,8 +1650,7 @@ async function startDeliberation() {
     } catch (e) {
       console.error('Validation request failed:', e);
       document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><p style="color:var(--dim);font-size:10px">请检查是否通过 http://localhost:8765 访问页面</p></div>';
-      var diag = window.__DIAG || {};
-      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><pre style="text-align:left;margin:12px auto;max-width:500px;font-size:9px;color:var(--muted);background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;overflow:auto;">' + JSON.stringify({api_base:window.API_BASE,diag:diag,origin:window.location.origin},null,2) + '</pre></div>';
+      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><pre style="text-align:left;margin:12px auto;max-width:500px;font-size:9px;color:var(--muted);background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;overflow:auto;">' + JSON.stringify({api_base:window.API_BASE,cloud:window.__CLOUD,origin:window.location.origin},null,2) + '</pre></div>';
       running = false;
       return;
     }

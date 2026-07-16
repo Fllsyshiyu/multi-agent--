@@ -22,14 +22,17 @@ st.set_page_config(
 )
 
 # ── 环境检测（多重判断）────────────────────────────────────────
-_CLOUD_DETECTED = any([
+# Check working directory: on cloud it's /mount/src/... or /app/...
+# On local Windows it's C:\Users\...\Desktop\...
+_root_lower = str(Path(__file__).resolve().parent).lower()
+_CLOUD_DETECTED = not any([
+    "desktop" in _root_lower,
+    "\\users\\" in _root_lower,
+]) or any([
     os.environ.get("STREAMLIT_SERVER_PORT"),
-    os.environ.get("STREAMLIT_RUNTIME_VERSION"),
-    os.environ.get("STREAMLIT_CLOUD"),
-    os.environ.get("STREAMLIT_APP_URL"),
     os.path.exists("/.dockerenv"),
 ])
-_CLOUD_URL = os.environ.get("STREAMLIT_APP_URL") or "https://multi-agent-yishi.streamlit.app"
+_CLOUD_URL = "https://multi-agent-yishi.streamlit.app"
 
 # ── 启动 FastAPI 后端（线程 + asyncio）──────────────────────────
 _API_HOST = "127.0.0.1"
@@ -111,36 +114,13 @@ if not HTML_PATH.exists():
 html_content = HTML_PATH.read_text(encoding="utf-8")
 
 # ── 注入诊断 + API 基础路径 ──────────────────────────────────
-_diag = {
-    "cloud_detected": _CLOUD_DETECTED,
-    "cloud_url": _CLOUD_URL,
-    "api_host": _API_HOST, "api_port": _API_PORT,
-}
-_diag_json = __import__("json").dumps(_diag)
-
 if _CLOUD_DETECTED:
-    _injection = f"""<base href="{_CLOUD_URL}/">
-<script>
-window.API_BASE='';
-window.__DIAG={_diag_json};
-console.log('[init] CLOUD mode | base=',document.querySelector('base')?.href,'| diag=',window.__DIAG);
-</script>"""
+    _injection = '<base href="https://multi-agent-yishi.streamlit.app/">\n<script>window.API_BASE="";window.__CLOUD=1;</script>'
 else:
-    _injection = f"""<script>
-window.API_BASE='http://localhost:8765';
-window.__DIAG={_diag_json};
-console.log('[init] LOCAL mode | API_BASE=',window.API_BASE,'| diag=',window.__DIAG);
-</script>"""
+    _injection = '<script>window.API_BASE="http://localhost:8765";window.__CLOUD=0;</script>'
 
-if "</head>" in html_content:
-    html_content = html_content.replace("</head>", _injection + "\n</head>", 1)
-else:
-    html_content = _injection + html_content
-
-# ── 诊断横幅（仅开发用，云端可看到 env 状态）───────────────────
-if _CLOUD_DETECTED:
-    _diag_banner = f'<!-- DIAG: CLOUD=True url={_CLOUD_URL} port={_API_PORT} -->'
-    html_content = _diag_banner + html_content
+# Inject at the VERY BEGINNING of HTML (before any tag)
+html_content = _injection + "\n" + html_content
 
 # 全屏渲染 HTML
 st.components.v1.html(
