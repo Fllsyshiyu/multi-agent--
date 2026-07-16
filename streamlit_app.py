@@ -62,52 +62,62 @@ except Exception:
 
 # ── 注册 API 代理到 Tornado（用 IOLoop callback 延迟注册）────────
 def _register_api_proxy():
-    def _patch():
-        import requests as _req
-        from streamlit.web.server import Server
-        import tornado.web
-        import json as _json
-        server = Server.get_current()
-        if server is None:
-            return
-        app = server._tornado_web_app
+    import requests as _req
+    import tornado.web
+    import json as _json
+    import gc
 
-        class HealthHandler(tornado.web.RequestHandler):
-            def get(self):
-                self.set_header("Content-Type", "application/json")
-                self.write(_json.dumps({"status":"ok","proxy":"active","note":"/api/* routes are proxied to backend"}))
+    class HealthHandler(tornado.web.RequestHandler):
+        def get(self):
+            self.set_header("Content-Type", "application/json")
+            self.write(_json.dumps({"status":"ok","proxy":"active"}))
 
-        class APIProxy(tornado.web.RequestHandler):
-            def _do_proxy(self):
-                target = f"http://{_API_HOST}:{_API_PORT}{self.request.uri}"
-                hdrs = {k: v for k, v in self.request.headers.get_all()
-                       if k.lower() not in ("host","content-length","connection")}
+    class APIProxy(tornado.web.RequestHandler):
+        def _do_proxy(self):
+            target = f"http://{_API_HOST}:{_API_PORT}{self.request.uri}"
+            hdrs = {k: v for k, v in self.request.headers.get_all()
+                   if k.lower() not in ("host","content-length","connection")}
+            try:
+                resp = _req.request(
+                    self.request.method, target,
+                    headers=hdrs, data=self.request.body or None,
+                    timeout=300,
+                )
+                self.set_status(resp.status_code)
+                for k, v in resp.headers.items():
+                    if k.lower() not in ("content-length","transfer-encoding","connection"):
+                        self.set_header(k, v)
+                self.write(resp.content)
+            except Exception as e:
+                self.set_status(502)
+                self.write(_json.dumps({"error":"backend unreachable","detail":str(e)}))
+
+        get = post = put = delete = patch = options = _do_proxy
+
+    def _try_register():
+        for obj in gc.get_objects():
+            if isinstance(obj, tornado.web.Application):
                 try:
-                    resp = _req.request(
-                        self.request.method, target,
-                        headers=hdrs, data=self.request.body or None,
-                        timeout=300,
-                    )
-                    self.set_status(resp.status_code)
-                    for k, v in resp.headers.items():
-                        if k.lower() not in ("content-length","transfer-encoding","connection"):
-                            self.set_header(k, v)
-                    self.write(resp.content)
+                    obj.add_handlers(r".*", [
+                        (r"/api/health", HealthHandler),
+                        (r"/api/.*", APIProxy),
+                    ])
+                    print("[proxy] registered via gc scan", flush=True)
+                    return True
                 except Exception:
-                    self.set_status(502)
-                    self.write(b'{"error":"backend unreachable"}')
+                    pass
+        return False
 
-            get = post = put = delete = patch = options = _do_proxy
-
-        app.add_handlers(r".*", [(r"/api/health", HealthHandler)])
-        app.add_handlers(r".*", [(r"/api/.*", APIProxy)])
-        print("[proxy] registered", flush=True)
-
-    try:
-        import tornado.ioloop
-        tornado.ioloop.IOLoop.current().add_callback(_patch)
-    except Exception:
-        pass
+    # Try immediately
+    if not _try_register():
+        # Retry with IOLoop callback (delayed)
+        try:
+            import tornado.ioloop
+            tornado.ioloop.IOLoop.current().add_callback(
+                lambda: _try_register() or None
+            )
+        except Exception:
+            pass
 
 _register_api_proxy()
 
