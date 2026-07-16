@@ -1,17 +1,14 @@
 """
 多智能体议事厅 · Streamlit 版
 Multi-Agent Deliberation System — streamlit_app.py
-
 部署到 Streamlit Community Cloud 时，Streamlit 会自动运行此文件。
 """
 
 import streamlit as st
 from pathlib import Path
-import threading
-import asyncio
-import time
-import os
 import sys
+import json
+import concurrent.futures
 
 # ── 页面配置 ──────────────────────────────────────────────
 st.set_page_config(
@@ -21,105 +18,46 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── 环境检测（多重判断）────────────────────────────────────────
-# Check working directory: on cloud it's /mount/src/... or /app/...
-# On local Windows it's C:\Users\...\Desktop\...
-_root_lower = str(Path(__file__).resolve().parent).lower()
-_CLOUD_DETECTED = not any([
-    "desktop" in _root_lower,
-    "\\users\\" in _root_lower,
-]) or any([
-    os.environ.get("STREAMLIT_SERVER_PORT"),
-    os.path.exists("/.dockerenv"),
-])
-_CLOUD_URL = "https://multi-agent-yishi.streamlit.app"
+# ── 确保 src 可导入 ─────────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).parent))
 
-# ── 启动 FastAPI 后端（线程 + asyncio）──────────────────────────
-_API_HOST = "127.0.0.1"
-_API_PORT = 8765
+# ── 在进程内调用 FastAPI（不启动服务器、不走网络）─────────────
+def _run_deliberation_in_process(topic, mode, quick_model, expert_models, api_keys, expert_api_keys):
+    """Use httpx.ASGITransport to call the FastAPI app in-process.
+    Returns (session_id, list_of_events)."""
+    import asyncio as _asyncio
+    import httpx
+    from api.main import app as fastapi_app
 
-def _start_fastapi_backend():
-    """在 daemon 线程中启动 uvicorn（asyncio + threading）。"""
-    import uvicorn
-    sys.path.insert(0, str(Path(__file__).parent))
+    async def _run():
+        transport = httpx.ASGITransport(app=fastapi_app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://_", timeout=600) as client:
+            resp = await client.post("/api/deliberation/start", json={
+                "topic": topic, "question": "",
+                "deliberation_mode": mode,
+                "quick_model": quick_model,
+                "expert_models": expert_models,
+                "api_keys": api_keys,
+                "expert_api_keys": expert_api_keys,
+            })
+            resp.raise_for_status()
+            session_id = resp.json().get("session_id", "")
 
-    def _serve():
-        from api.main import app as fastapi_app
-        cfg = uvicorn.Config(fastapi_app, host=_API_HOST, port=_API_PORT, log_level="warning")
-        srv = uvicorn.Server(cfg)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(srv.serve())
+            events = []
+            async with client.stream("GET", "/api/deliberation/stream") as stream:
+                async for line in stream.aiter_lines():
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        try:
+                            events.append(json.loads(data))
+                        except json.JSONDecodeError:
+                            pass
+            return {"session_id": session_id, "events": events}
 
-    t = threading.Thread(target=_serve, daemon=True)
-    t.start()
-    time.sleep(2)  # give uvicorn a moment to bind
-
-try:
-    _start_fastapi_backend()
-except Exception:
-    pass  # backend might already be running on reload
-
-# ── 注册 API 代理到 Tornado（用 IOLoop callback 延迟注册）────────
-def _register_api_proxy():
-    import requests as _req
-    import tornado.web
-    import json as _json
-    import gc
-
-    class HealthHandler(tornado.web.RequestHandler):
-        def get(self):
-            self.set_header("Content-Type", "application/json")
-            self.write(_json.dumps({"status":"ok","proxy":"active"}))
-
-    class APIProxy(tornado.web.RequestHandler):
-        def _do_proxy(self):
-            target = f"http://{_API_HOST}:{_API_PORT}{self.request.uri}"
-            hdrs = {k: v for k, v in self.request.headers.get_all()
-                   if k.lower() not in ("host","content-length","connection")}
-            try:
-                resp = _req.request(
-                    self.request.method, target,
-                    headers=hdrs, data=self.request.body or None,
-                    timeout=300,
-                )
-                self.set_status(resp.status_code)
-                for k, v in resp.headers.items():
-                    if k.lower() not in ("content-length","transfer-encoding","connection"):
-                        self.set_header(k, v)
-                self.write(resp.content)
-            except Exception as e:
-                self.set_status(502)
-                self.write(_json.dumps({"error":"backend unreachable","detail":str(e)}))
-
-        get = post = put = delete = patch = options = _do_proxy
-
-    def _try_register():
-        for obj in gc.get_objects():
-            if isinstance(obj, tornado.web.Application):
-                try:
-                    obj.add_handlers(r".*", [
-                        (r"/api/health", HealthHandler),
-                        (r"/api/.*", APIProxy),
-                    ])
-                    print("[proxy] registered via gc scan", flush=True)
-                    return True
-                except Exception:
-                    pass
-        return False
-
-    # Try immediately
-    if not _try_register():
-        # Retry with IOLoop callback (delayed)
-        try:
-            import tornado.ioloop
-            tornado.ioloop.IOLoop.current().add_callback(
-                lambda: _try_register() or None
-            )
-        except Exception:
-            pass
-
-_register_api_proxy()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        return pool.submit(_asyncio.run, _run()).result(timeout=600)
 
 # ── 加载并渲染前端 HTML ──────────────────────────────────
 HTML_PATH = Path(__file__).parent / "frontend" / "index.html"
@@ -130,18 +68,32 @@ if not HTML_PATH.exists():
 
 html_content = HTML_PATH.read_text(encoding="utf-8")
 
-# ── 注入诊断 + API 基础路径 ──────────────────────────────────
-if _CLOUD_DETECTED:
-    _injection = '<base href="https://multi-agent-yishi.streamlit.app/">\n<script>window.API_BASE="";window.__CLOUD=1;</script>'
-else:
-    _injection = '<script>window.API_BASE="http://localhost:8765";window.__CLOUD=0;</script>'
+# ── 注入预计算的结果（如果有）──────────────────────────────────
+if "deliberation_result" in st.session_state and st.session_state.deliberation_result is not None:
+    result = st.session_state.deliberation_result
+    result_json = json.dumps(result)
+    injection = f"<script>window.__DELIBERATION_RESULT__={result_json};</script>"
+    html_content = injection + "\n" + html_content
+    st.session_state.deliberation_result = None
 
-# Inject at the VERY BEGINNING of HTML (before any tag)
-html_content = _injection + "\n" + html_content
-
-# 全屏渲染 HTML
-st.components.v1.html(
+# ── 渲染组件 ──────────────────────────────────────────────
+component_result = st.components.v1.html(
     html_content,
     height=1080,
     scrolling=True,
 )
+
+# ── 处理前端发来的议事请求 ──────────────────────────────────
+if component_result and isinstance(component_result, dict):
+    if component_result.get("_st_action") == "run_deliberation":
+        with st.spinner("🤖 多智能体议事进行中，请稍候..."):
+            result = _run_deliberation_in_process(
+                component_result.get("topic", ""),
+                component_result.get("mode", "quick"),
+                component_result.get("quick_model", "deepseek-v4-pro"),
+                component_result.get("expert_models", {}),
+                component_result.get("api_keys", {}),
+                component_result.get("expert_api_keys", {}),
+            )
+        st.session_state.deliberation_result = result
+        st.rerun()

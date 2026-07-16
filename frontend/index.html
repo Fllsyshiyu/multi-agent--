@@ -1624,103 +1624,14 @@ async function startDeliberation() {
 
   // Choose API or embedded engine based on API key availability
   if (hasApiKeys()) {
-    // Step 1: Validate API keys BEFORE starting
     const statusBadge = document.getElementById('statusBadge');
-    statusBadge.textContent = '⏳ 正在验证 API Key...';
+    statusBadge.textContent = '⏳ 发起议事请求...';
     statusBadge.className = 'status-badge running';
 
-    const mode = currentMode;
-    const quickModel = document.getElementById('quickModelSelect')?.value || 'deepseek-v4-pro';
-    const expertModels = {};
-    if (mode === 'expert') {
-      AGENTS.forEach(a => {
-        const sel = document.getElementById('expertModel_' + a.id);
-        if (sel) expertModels[a.id] = sel.value;
-      });
-    }
-    const apiKeys = mode === 'expert' ? {} : getApiKeys();
-    const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
+    // Show waiting state
+    document.getElementById('rightStage').innerHTML = '<div class="empty-state"><div style="font-size:32px">⏳</div><div>正在发起议事请求，请稍候...</div></div>';
 
-    // Debug: show what we are about to send
-    const debugInfo = `[DEBUG] mode=${mode} model=${quickModel} providers=${Object.keys(apiKeys).join(',') || 'none'}`;
-    console.log(debugInfo);
-    document.getElementById('rightStage').innerHTML = '<div class="empty-state"><div style="font-size:32px">⏳</div><div>正在验证 API Key...</div><div style="font-size:10px;color:var(--dim);margin-top:8px">' + debugInfo + '</div></div>';
-
-    let validation = null;
-    try {
-      const vResp = await fetch(apiUrl('/api/deliberation/validate_keys'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic, question: '',
-          deliberation_mode: mode,
-          quick_model: quickModel,
-          expert_models: expertModels,
-          api_keys: apiKeys,
-          expert_api_keys: expertApiKeys,
-        }),
-      });
-      validation = await vResp.json();
-      // Always log full response for debugging
-      console.log('[VALIDATE RESPONSE]', JSON.stringify(validation));
-    } catch (e) {
-      console.error('Validation request failed:', e);
-      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><p style="color:var(--dim);font-size:10px">请检查是否通过 http://localhost:8765 访问页面</p></div>';
-      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><pre style="text-align:left;margin:12px auto;max-width:500px;font-size:9px;color:var(--muted);background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;overflow:auto;">api_base=' + JSON.stringify(window.API_BASE) + '\ncloud=' + JSON.stringify(window.__CLOUD) + '\nreferrer=' + JSON.stringify(document.referrer) + '\norigin=' + JSON.stringify(window.location.origin) + '</pre></div>';
-      running = false;
-      return;
-    }
-
-    if (validation && validation.all_valid) {
-      // All keys valid — proceed with real API
-      statusBadge.textContent = '✅ API Key 验证通过 — 真实API模式';
-      statusBadge.className = 'status-badge running';
-      collectedData.validation = validation;
-      await startAPIDeliberation();
-    } else if (validation && validation.any_valid) {
-      // Partial success — warn but proceed
-      const failed = validation.results.filter(r => !r.valid).map(r => r.model || r.agent_id).join(', ');
-      statusBadge.textContent = '⚠️ 部分Key失败 — 混合模式';
-      statusBadge.className = 'status-badge running';
-      console.warn('Some API keys failed validation:', failed);
-      collectedData.validation = validation;
-      await startAPIDeliberation();
-    } else {
-      // All keys failed — show clear error and block
-      const errMsg = validation ? validation.summary : '无法连接验证服务';
-      const detailLines = validation ? validation.results.map(r =>
-        `  - ${r.model || r.provider}: ${r.error || '未知错误'}`
-      ).join('\n') : '';
-      const sentInfo = `发送配置: mode=${mode} model=${quickModel} key_providers=${Object.keys(apiKeys).join(',') || '无'}`;
-      const rawResponse = validation ? JSON.stringify(validation, null, 2) : 'null';
-      console.error('[VALIDATE FAILED]', rawResponse);
-      statusBadge.textContent = '❌ API Key 验证失败';
-      statusBadge.className = 'status-badge error';
-      document.getElementById('rightStage').innerHTML = `
-        <div class="empty-state" style="padding:40px;text-align:center;">
-          <div style="font-size:48px;margin-bottom:16px;">🔑</div>
-          <h3>API Key 验证失败</h3>
-          <p style="color:#ef4444;max-width:500px;margin:0 auto;">${errMsg}</p>
-          <pre style="text-align:left;max-width:500px;margin:12px auto;color:#6b7280;font-size:13px;">${detailLines}</pre>
-          <p style="color:var(--dim);font-size:11px;margin-top:8px;">${sentInfo}</p>
-          <details style="margin-top:8px;max-width:500px;text-align:left;">
-            <summary style="color:var(--dim);font-size:10px;cursor:pointer;">原始响应 (点击展开)</summary>
-            <pre style="color:#6b7280;font-size:10px;overflow:auto;max-height:200px;">${rawResponse}</pre>
-          </details>
-          <div style="margin-top:20px;display:flex;gap:12px;justify-content:center;">
-            <button onclick="running=false;document.getElementById('btnStart').disabled=false;startDeliberationFallback('${topic.replace(/'/g, "\\'")}')"
-                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">
-              使用模板模拟模式
-            </button>
-            <button onclick="running=false;document.getElementById('btnStart').disabled=false;document.getElementById('statusBadge').textContent='就绪';document.getElementById('statusBadge').className='status-badge';"
-                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">
-              返回修改 Key
-            </button>
-          </div>
-        </div>`;
-      running = false;
-      document.getElementById('btnStart').disabled = false;
-    }
+    await startAPIDeliberation();
   } else {
     document.getElementById('statusBadge').textContent = '🔄 议事进行中 (模拟模式)...';
     document.getElementById('statusBadge').className = 'status-badge running';
@@ -2456,72 +2367,24 @@ async function startAPIDeliberation() {
     });
   }
 
-  // UI already set up by startDeliberation()
+  const apiKeys = mode === 'expert' ? {} : getApiKeys();
+  const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
 
-  try {
-    // Step 1: Initialize deliberation session
-    const apiKeys = mode === 'expert' ? {} : getApiKeys();
-    const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
-    const initResp = await fetch(apiUrl('/api/deliberation/start'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        topic, question: '',
-        deliberation_mode: mode,
-        quick_model: quickModel,
-        expert_models: expertModels,
-        api_keys: apiKeys,
-        expert_api_keys: expertApiKeys,
-      }),
-    });
+  // Show processing state
+  const sb = document.getElementById('statusBadge');
+  if (sb) { sb.textContent = '⏳ 发起议事请求...'; sb.className = 'status-badge running'; }
 
-    if (!initResp.ok) throw new Error('API init error: ' + initResp.status);
-    const initData = await initResp.json();
-
-    // Show session info in status
-    const modelInfo = mode === 'quick' ? quickModel : (Object.values(expertModels)[0] || '多模型');
-    const sb = document.getElementById('statusBadge');
-    if (sb) { sb.textContent = '🔵 真实API ' + modelInfo; sb.className = 'status-badge running'; }
-
-    // Step 2: Stream deliberation via SSE
-    const response = await fetch(apiUrl('/api/deliberation/stream'));
-    if (!response.ok) throw new Error('API stream error: ' + response.status);
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (running) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const event = JSON.parse(line.slice(6));
-            await handleEngineEvent(event);
-          } catch (e) { console.error('Event handler error:', e); }
-        }
-      }
-    }
-  } catch (e) {
-    console.error('API deliberation error, falling back to embedded engine:', e);
-    var sb2 = document.getElementById('statusBadge');
-    if (sb2) { sb2.textContent = '⚠️ API失败，回退模拟模式'; sb2.className = 'status-badge running'; }
-    // Fallback to embedded engine
-    running = true;
-    const gen = runDeliberation(topic);
-    for await (const event of gen) {
-      if (!running) break;
-      await handleEngineEvent(event);
-    }
-  }
-
-  finishDeliberation();
+  // Send to Python backend in-process via Streamlit component messaging
+  Streamlit.setComponentValue({
+    _st_action: 'run_deliberation',
+    topic: topic,
+    mode: mode,
+    quick_model: quickModel,
+    expert_models: expertModels,
+    api_keys: apiKeys,
+    expert_api_keys: expertApiKeys,
+  });
+  // The page will reload when results are ready (via st.rerun)
 }
 
 // ============================================================
@@ -2551,6 +2414,41 @@ buildExpertAgentList();
 loadModeConfig();
 renderSopBar();
 highlightActiveApiKey();
+
+// ─── Check for pre-computed deliberation results ──────────
+(function checkDeliberationResult() {
+  if (!window.__DELIBERATION_RESULT__) return;
+  var result = window.__DELIBERATION_RESULT__;
+  delete window.__DELIBERATION_RESULT__;
+
+  if (!result || !result.events) {
+    // Error or no events
+    var sb = document.getElementById('statusBadge');
+    if (sb) { sb.textContent = '❌ 议事失败'; sb.className = 'status-badge error'; }
+    if (result && result.error) {
+      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;"><div style="font-size:48px">❌</div><h3>' + result.error + '</h3></div>';
+    }
+    return;
+  }
+
+  // Process pre-computed events (replay like SSE)
+  var sb = document.getElementById('statusBadge');
+  if (sb) { sb.textContent = '🔵 真实API 议事中...'; sb.className = 'status-badge running'; }
+
+  var events = result.events;
+  var idx = 0;
+  function processNext() {
+    if (idx >= events.length) {
+      finishDeliberation();
+      return;
+    }
+    var event = events[idx++];
+    try { handleEngineEvent(event); } catch(e) { console.error('Event error:', e); }
+    // Small delay for visual playback
+    setTimeout(processNext, 50);
+  }
+  processNext();
+})();
 </script>
 </body>
 </html>
