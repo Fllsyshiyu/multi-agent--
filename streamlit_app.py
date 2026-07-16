@@ -66,10 +66,16 @@ def _register_api_proxy():
         import requests as _req
         from streamlit.web.server import Server
         import tornado.web
+        import json as _json
         server = Server.get_current()
         if server is None:
             return
         app = server._tornado_web_app
+
+        class HealthHandler(tornado.web.RequestHandler):
+            def get(self):
+                self.set_header("Content-Type", "application/json")
+                self.write(_json.dumps({"status":"ok","proxy":"active","note":"/api/* routes are proxied to backend"}))
 
         class APIProxy(tornado.web.RequestHandler):
             def _do_proxy(self):
@@ -93,6 +99,7 @@ def _register_api_proxy():
 
             get = post = put = delete = patch = options = _do_proxy
 
+        app.add_handlers(r".*", [(r"/api/health", HealthHandler)])
         app.add_handlers(r".*", [(r"/api/.*", APIProxy)])
         print("[proxy] registered", flush=True)
 

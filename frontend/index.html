@@ -627,7 +627,23 @@ window.addEventListener('unhandledrejection', function(e) {
 
 // ─── API URL helper ───────────────────────────────────────────
 function apiUrl(path) {
-  return (window.API_BASE || '') + path;
+  var base = window.API_BASE;
+  if (base === undefined || base === null || base === '') {
+    // Autodetect: if we can't determine the base URL,
+    // try document.referrer (works in srcdoc iframes on some browsers)
+    // or fall back to the known cloud URL.
+    var ref = document.referrer || '';
+    var m = ref.match(/^https?:\/\/[^\/]+/);
+    if (m) { base = m[0]; }
+    else if (typeof window.__CLOUD === 'undefined' || window.__CLOUD === 1) {
+      base = 'https://multi-agent-yishi.streamlit.app';
+    } else {
+      base = 'http://localhost:8765';
+    }
+    console.warn('[apiUrl] API_BASE auto-detected as', base, '(API_BASE was', window.API_BASE, ')');
+    window.API_BASE = base;
+  }
+  return base + path;
 }
 
 // ============================================================
@@ -1650,7 +1666,7 @@ async function startDeliberation() {
     } catch (e) {
       console.error('Validation request failed:', e);
       document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><p style="color:var(--dim);font-size:10px">请检查是否通过 http://localhost:8765 访问页面</p></div>';
-      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><pre style="text-align:left;margin:12px auto;max-width:500px;font-size:9px;color:var(--muted);background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;overflow:auto;">' + JSON.stringify({api_base:window.API_BASE,cloud:window.__CLOUD,origin:window.location.origin},null,2) + '</pre></div>';
+      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><pre style="text-align:left;margin:12px auto;max-width:500px;font-size:9px;color:var(--muted);background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;overflow:auto;">api_base=' + JSON.stringify(window.API_BASE) + '\ncloud=' + JSON.stringify(window.__CLOUD) + '\nreferrer=' + JSON.stringify(document.referrer) + '\norigin=' + JSON.stringify(window.location.origin) + '</pre></div>';
       running = false;
       return;
     }
