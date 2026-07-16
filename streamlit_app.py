@@ -106,29 +106,19 @@ if not HTML_PATH.exists():
 html_content = HTML_PATH.read_text(encoding="utf-8")
 
 # ── 注入 API 基础路径（Python 端直接决定，不依赖浏览器检测）─────
-_api_base_injection = """<script>
-(function(){
-  // st.components.v1.html renders in a sandboxed about:blank iframe.
-  // window.location.origin is null, window.parent is blocked.
-  // Use document.referrer to get the parent page URL.
-  var origin = '';
-  try {
-    var ref = document.referrer;
-    if (ref) {
-      var m = ref.match(/^(https?:\\/\\/[^\\/]+)/);
-      if (m) origin = m[1];
-    }
-  } catch(e) {}
-  var isCloud = origin.indexOf('streamlit.app') !== -1;
-  window.API_BASE = isCloud ? origin : 'http://localhost:8765';
-  console.log('[init] referrer origin =', JSON.stringify(origin), '| API_BASE =', JSON.stringify(window.API_BASE));
-})();
-</script>"""
-
-if "</head>" in html_content:
-    html_content = html_content.replace("</head>", _api_base_injection + "\n</head>", 1)
+if _is_streamlit_cloud:
+    # Sandboxed iframe can't detect parent origin via JS.
+    # Inject <base> tag so ALL relative URLs resolve to the cloud origin.
+    _cloud_url = "https://multi-agent-yishi.streamlit.app"
+    _base_tag = f'<base href="{_cloud_url}/">'
+    _api_script = """<script>window.API_BASE='';</script>"""
+    html_content = html_content.replace("<head>", f"<head>\n{_base_tag}\n{_api_script}", 1)
 else:
-    html_content = _api_base_injection + html_content
+    _api_script = """<script>window.API_BASE='http://localhost:8765';</script>"""
+    if "</head>" in html_content:
+        html_content = html_content.replace("</head>", _api_script + "\n</head>", 1)
+    else:
+        html_content = _api_script + html_content
 
 # 全屏渲染 HTML
 st.components.v1.html(
