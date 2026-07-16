@@ -2356,9 +2356,12 @@ function loadModeConfig() {
 // API INTEGRATION (backend SSE)
 // ============================================================
 async function startAPIDeliberation() {
+  const API_BASE = "https://multi-agent-api-2heu.onrender.com";
+
   const topic = document.getElementById('topicDisplay').textContent;
   const mode = currentMode;
   const quickModel = document.getElementById('quickModelSelect')?.value || 'deepseek-v4-pro';
+
   const expertModels = {};
   if (mode === 'expert') {
     AGENTS.forEach(a => {
@@ -2370,23 +2373,115 @@ async function startAPIDeliberation() {
   const apiKeys = mode === 'expert' ? {} : getApiKeys();
   const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
 
-  // Show processing state
-  const sb = document.getElementById('statusBadge');
-  if (sb) { sb.textContent = '⏳ 发起议事请求...'; sb.className = 'status-badge running'; }
-
-  // Navigate parent to trigger Streamlit rerun with query params
-  var payload = JSON.stringify({
-    _st_action: 'run_deliberation',
+  const body = {
     topic: topic,
-    mode: mode,
+    question: '',
+    deliberation_mode: mode,
     quick_model: quickModel,
     expert_models: expertModels,
     api_keys: apiKeys,
     expert_api_keys: expertApiKeys,
-  });
-  var parentUrl = window.parent.location.href.split('?')[0];
-  window.parent.location.href = parentUrl + '?_st_payload=' + encodeURIComponent(payload);
-  // The page will reload when results are ready (via st.rerun)
+  };
+
+  try {
+    const sb = document.getElementById('statusBadge');
+    if (sb) {
+      sb.textContent = '正在连接真实 API...';
+      sb.className = 'status-badge running';
+    }
+
+    document.getElementById('rightStage').innerHTML =
+      '<div class="empty-state">' +
+      '<div style="font-size:32px">⏳</div>' +
+      '<div>正在连接后端 API，请稍候...</div>' +
+      '</div>';
+
+    const initResp = await fetch(`${API_BASE}/api/deliberation/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!initResp.ok) {
+      throw new Error('API init error: ' + initResp.status);
+    }
+
+    await initResp.json();
+
+    if (sb) {
+      sb.textContent = '真实 API 议事中...';
+      sb.className = 'status-badge running';
+    }
+
+    const response = await fetch(`${API_BASE}/api/deliberation/stream`);
+
+    if (!response.ok) {
+      throw new Error('API stream error: ' + response.status);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const result = await reader.read();
+
+      if (result.done) {
+        break;
+      }
+
+      buffer += decoder.decode(result.value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (!trimmed.startsWith('data: ')) {
+          continue;
+        }
+
+        const data = trimmed.slice(6);
+
+        if (data === '[DONE]') {
+          finishDeliberation();
+          return;
+        }
+
+        try {
+          const event = JSON.parse(data);
+          await handleEngineEvent(event);
+        } catch (err) {
+          console.error('Bad SSE event:', err, data);
+        }
+      }
+    }
+
+    finishDeliberation();
+  } catch (err) {
+    console.error(err);
+
+    running = false;
+
+    const startBtn = document.getElementById('btnStart');
+    if (startBtn) {
+      startBtn.disabled = false;
+    }
+
+    const sb = document.getElementById('statusBadge');
+    if (sb) {
+      sb.textContent = 'API 请求失败';
+      sb.className = 'status-badge error';
+    }
+
+    document.getElementById('rightStage').innerHTML =
+      '<div class="empty-state" style="padding:40px;text-align:center;">' +
+      '<div style="font-size:48px">❌</div>' +
+      '<h3>API 请求失败</h3>' +
+      '<p style="color:#ef4444">' + String(err.message || err) + '</p>' +
+      '</div>';
+  }
 }
 
 // ============================================================
