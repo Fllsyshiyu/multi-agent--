@@ -44,7 +44,6 @@ def _register_api_proxy():
     try:
         from streamlit.web.server import Server
         import tornado.web
-        import httpx
 
         server = Server.get_current()
         if server is None:
@@ -52,30 +51,59 @@ def _register_api_proxy():
 
         tornado_app = server._tornado_web_app
 
+        # Try httpx first, fall back to tornado's built-in HTTP client
+        try:
+            import httpx
+            _HTTPX_AVAILABLE = True
+        except ImportError:
+            _HTTPX_AVAILABLE = False
+
         class APIProxy(tornado.web.RequestHandler):
             async def get(self):
                 target = f"http://127.0.0.1:8765{self.request.uri}"
                 headers = {k: v for k, v in self.request.headers.get_all()
                           if k.lower() not in ('host', 'content-length', 'connection')}
-                async with httpx.AsyncClient(timeout=300.0) as client:
-                    resp = await client.get(target, headers=headers)
-                self.set_status(resp.status_code)
-                for k, v in resp.headers.items():
-                    if k.lower() not in ('content-length', 'transfer-encoding', 'connection'):
-                        self.set_header(k, v)
-                self.write(resp.content)
+                if _HTTPX_AVAILABLE:
+                    async with httpx.AsyncClient(timeout=300.0) as client:
+                        resp = await client.get(target, headers=headers)
+                    self.set_status(resp.status_code)
+                    for k, v in resp.headers.items():
+                        if k.lower() not in ('content-length', 'transfer-encoding', 'connection'):
+                            self.set_header(k, v)
+                    self.write(resp.content)
+                else:
+                    http = tornado.httpclient.AsyncHTTPClient()
+                    req = tornado.httpclient.HTTPRequest(target, method='GET', headers=headers,
+                                                         request_timeout=300)
+                    resp = await http.fetch(req, raise_error=False)
+                    self.set_status(resp.code)
+                    for k, v in resp.headers.get_all():
+                        if k.lower() not in ('content-length', 'transfer-encoding', 'connection'):
+                            self.set_header(k, v)
+                    self.write(resp.body or b'')
 
             async def post(self):
                 target = f"http://127.0.0.1:8765{self.request.uri}"
                 headers = {k: v for k, v in self.request.headers.get_all()
                           if k.lower() not in ('host', 'content-length', 'connection')}
-                async with httpx.AsyncClient(timeout=300.0) as client:
-                    resp = await client.post(target, content=self.request.body, headers=headers)
-                self.set_status(resp.status_code)
-                for k, v in resp.headers.items():
-                    if k.lower() not in ('content-length', 'transfer-encoding', 'connection'):
-                        self.set_header(k, v)
-                self.write(resp.content)
+                if _HTTPX_AVAILABLE:
+                    async with httpx.AsyncClient(timeout=300.0) as client:
+                        resp = await client.post(target, content=self.request.body, headers=headers)
+                    self.set_status(resp.status_code)
+                    for k, v in resp.headers.items():
+                        if k.lower() not in ('content-length', 'transfer-encoding', 'connection'):
+                            self.set_header(k, v)
+                    self.write(resp.content)
+                else:
+                    http = tornado.httpclient.AsyncHTTPClient()
+                    req = tornado.httpclient.HTTPRequest(target, method='POST', headers=headers,
+                                                         body=self.request.body, request_timeout=300)
+                    resp = await http.fetch(req, raise_error=False)
+                    self.set_status(resp.code)
+                    for k, v in resp.headers.get_all():
+                        if k.lower() not in ('content-length', 'transfer-encoding', 'connection'):
+                            self.set_header(k, v)
+                    self.write(resp.body or b'')
 
         tornado_app.add_handlers(r".*", [(r"/api/.*", APIProxy)])
         return True
@@ -96,9 +124,12 @@ html_content = HTML_PATH.read_text(encoding="utf-8")
 # ── 注入 API 基础路径 ───────────────────────────────────────
 _api_base_injection = """<script>
 (function(){
-  var host = window.location.hostname || '';
+  // st.components.v1.html runs in about:blank iframe;
+  // use parent window to detect the real origin
+  var host = (window.parent && window.parent.location.hostname) || window.location.hostname || '';
   var isCloud = host.indexOf('streamlit.app') !== -1;
-  window.API_BASE = isCloud ? window.location.origin : 'http://localhost:8765';
+  var origin = (window.parent && window.parent.location.origin) || window.location.origin || '';
+  window.API_BASE = isCloud ? origin : 'http://localhost:8765';
 })();
 </script>"""
 
