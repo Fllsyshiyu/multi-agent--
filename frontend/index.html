@@ -625,6 +625,11 @@ window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled rejection:', e.reason);
 });
 
+// ─── API URL helper ───────────────────────────────────────────
+function apiUrl(path) {
+  return (window.API_BASE || '') + path;
+}
+
 // ============================================================
 // MULTI-AGENT DELIBERATION ENGINE (embedded, real-time)
 // ============================================================
@@ -1627,7 +1632,7 @@ async function startDeliberation() {
 
     let validation = null;
     try {
-      const vResp = await fetch('/api/deliberation/validate_keys', {
+      const vResp = await fetch(apiUrl('/api/deliberation/validate_keys'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1645,6 +1650,7 @@ async function startDeliberation() {
     } catch (e) {
       console.error('Validation request failed:', e);
       document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><p style="color:var(--dim);font-size:10px">请检查是否通过 http://localhost:8765 访问页面</p></div>';
+      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><p style="color:var(--dim);font-size:10px">API 地址: ' + (window.API_BASE || window.location.origin) + ' — 请检查后端是否在线</p></div>';
       running = false;
       return;
     }
@@ -2440,7 +2446,7 @@ async function startAPIDeliberation() {
     // Step 1: Initialize deliberation session
     const apiKeys = mode === 'expert' ? {} : getApiKeys();
     const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
-    const initResp = await fetch('/api/deliberation/start', {
+    const initResp = await fetch(apiUrl('/api/deliberation/start'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2462,7 +2468,7 @@ async function startAPIDeliberation() {
     if (sb) { sb.textContent = '🔵 真实API ' + modelInfo; sb.className = 'status-badge running'; }
 
     // Step 2: Stream deliberation via SSE
-    const response = await fetch('/api/deliberation/stream');
+    const response = await fetch(apiUrl('/api/deliberation/stream'));
     if (!response.ok) throw new Error('API stream error: ' + response.status);
 
     const reader = response.body.getReader();
