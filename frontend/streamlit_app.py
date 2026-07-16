@@ -1,33 +1,44 @@
-"""
-多智能体议事厅 · Streamlit 版
-Multi-Agent Deliberation System — streamlit_app.py
-
-部署到 Streamlit Community Cloud 时，Streamlit 会自动运行此文件。
-"""
-
-import streamlit as st
 from pathlib import Path
 
-# ── 页面配置 ──────────────────────────────────────────────
+import streamlit as st
+import streamlit.components.v1 as components
+
 st.set_page_config(
-    page_title="多智能体议事厅",
-    page_icon="🏛️",
+    page_title="Multi-Agent Deliberation",
+    page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="collapsed",
 )
 
-# ── 加载并渲染前端 HTML ──────────────────────────────────
-HTML_PATH = Path(__file__).parent / "frontend" / "index.html"
+CURRENT_DIR = Path(__file__).resolve().parent
+INDEX_HTML = CURRENT_DIR / "index.html"
 
-if not HTML_PATH.exists():
-    st.error(f"Cannot find: {HTML_PATH}")
+st.markdown(
+    """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .block-container {
+        padding: 0;
+        max-width: 100%;
+    }
+    iframe {
+        width: 100%;
+        min-height: 100vh;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+if not INDEX_HTML.exists():
+    st.error(f"Cannot find: {INDEX_HTML}")
     st.stop()
 
-html_content = HTML_PATH.read_text(encoding="utf-8")
+html = INDEX_HTML.read_text(encoding="utf-8")
 
-# 全屏渲染 HTML
-st.components.v1.html(
-    html_content,
-    height=1080,
+components.html(
+    html,
+    height=1100,
     scrolling=True,
 )
