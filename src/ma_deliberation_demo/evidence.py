@@ -48,13 +48,19 @@ def retrieve_for_agent(
     L1: Match by archetype / actor_type overlap
     L2: Filter by concern_type relevance and stance compatibility
     """
+    direct_matches = []
     matched = []
 
     for card in evidence_pool:
         # L1: archetype match
-        if card.usable_agent and card.usable_agent not in agent.agent_name and card.usable_agent not in agent.archetype:
+        if card.usable_agent:
+            # RAG case cards are scoped to one agent_id.  Legacy CSV cards
+            # may use an agent name or an archetype, so keep all three forms.
+            if card.usable_agent not in {agent.agent_id, agent.agent_name, agent.archetype}:
+                continue
+            direct_matches.append(card)
             continue
-        if not card.usable_agent:
+        else:
             # Check if archetype matches loosely
             if card.archetype not in agent.archetype and card.actor_type not in agent.archetype:
                 continue
@@ -69,10 +75,11 @@ def retrieve_for_agent(
         if concern_match or not matched:
             matched.append(card)
 
-    # Assign evidence IDs to agent
-    agent.evidence_ids = [c.evidence_id for c in matched[:max_cards]]
+    selected = (direct_matches + matched)[:max_cards]
+    # Assign evidence IDs to agent. This is also enforced by boundary_checker.
+    agent.evidence_ids = [c.evidence_id for c in selected]
 
-    return matched[:max_cards]
+    return selected
 
 
 def format_evidence_context(cards: list[EvidenceCard]) -> str:

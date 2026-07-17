@@ -11,6 +11,14 @@ dependencies = [
   "streamlit>=1.32",
 ]
 
+[project.optional-dependencies]
+rag = [
+  "sentence-transformers>=3.0",
+  "torch>=2.2",
+  "numpy>=1.26",
+  "faiss-cpu>=1.8",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

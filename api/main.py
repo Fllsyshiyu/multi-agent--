@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from ma_deliberation_demo.topic import analyze_topic, compute_complexity
 from ma_deliberation_demo.agents import load_archetypes, generate_agents, get_agent_prompt, load_deliberation_sop
 from ma_deliberation_demo.evidence import load_evidence, retrieve_for_agent, format_evidence_context
+from ma_deliberation_demo.knowledge import load_knowledge_config, load_knowledge_retriever
 from ma_deliberation_demo.schemas import DeliberationState, Utterance
 from ma_deliberation_demo.artifacts import (
     AgentContract, DeliberationPlan, GateCheckResult, ObserverSnapshot,
@@ -73,6 +74,8 @@ _topic_analysis = None
 _message_pool = MessagePool()
 _deliberation_config: dict = {}  # stores mode, model, api_keys from last request
 _protocol_runtime: ProtocolRuntime | None = None
+_knowledge_config = None
+_knowledge_retriever = None
 
 # ── Model → (provider, base_url) mapping ──────────────────────────────────
 
@@ -117,8 +120,18 @@ PROVIDER_KEY_ENV = {
 
 @app.on_event("startup")
 async def startup():
-    global _evidence_pool
+    global _evidence_pool, _knowledge_config, _knowledge_retriever
     _evidence_pool = load_evidence()
+    try:
+        _knowledge_config = load_knowledge_config()
+        _knowledge_retriever = load_knowledge_retriever(_knowledge_config)
+        if _knowledge_retriever:
+            print("[STARTUP] Local RAG index loaded; role-specific knowledge views enabled", flush=True)
+        else:
+            print("[STARTUP] Local RAG index not built yet; using CSV evidence cards only", flush=True)
+    except (OSError, ValueError) as exc:
+        _knowledge_retriever = None
+        print(f"[STARTUP] Local RAG unavailable: {exc}", flush=True)
     # Verify SOP is loaded and report status
     sop = load_deliberation_sop()
     if sop:
@@ -137,7 +150,12 @@ async def root():
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0", "mode": "sop+fishbowl"}
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "mode": "sop+fishbowl",
+        "knowledge_rag_ready": bool(_knowledge_retriever and _knowledge_retriever.is_ready),
+    }
 
 
 # ── Session management ────────────────────────────────────────────────────
@@ -158,6 +176,7 @@ class DeliberationRequest(BaseModel):
 async def start_deliberation(req: DeliberationRequest):
     """Initialize a new SOP deliberation session."""
     global _current_state, _topic_analysis, _message_pool, _deliberation_config, _protocol_runtime
+    global _evidence_pool, _knowledge_retriever
 
     # Save deliberation config for stream use
     _deliberation_config = {
@@ -174,6 +193,22 @@ async def start_deliberation(req: DeliberationRequest):
     complexity = compute_complexity(_topic_analysis)
     archetypes = load_archetypes()
     agents = generate_agents(req.topic, _topic_analysis, archetypes)
+
+    # Start every session from the static CSV cards, then add one dedicated
+    # RAG window per agent. The corpus is shared; the scoped usable_agent ID
+    # prevents one role from citing another role's retrieved material.
+    _evidence_pool = load_evidence()
+    if _knowledge_config is not None:
+        _knowledge_retriever = load_knowledge_retriever(_knowledge_config)
+    if _knowledge_retriever:
+        for agent in agents:
+            try:
+                _evidence_pool.extend(
+                    _knowledge_retriever.evidence_for_agent(agent, req.topic, req.question)
+                )
+            except RuntimeError as exc:
+                print(f"[RAG] Skipping local case retrieval: {exc}", flush=True)
+                break
 
     for agent in agents:
         retrieve_for_agent(agent, _evidence_pool)
@@ -249,6 +284,14 @@ async def start_deliberation(req: DeliberationRequest):
         "max_rounds": _deliberation_config["max_rounds"],
         "max_speakers": _deliberation_config["max_speakers"],
         "deliberation_mode": req.deliberation_mode,
+        "knowledge_rag": {
+            "enabled": bool(_knowledge_retriever and _knowledge_retriever.is_ready),
+            "shared_corpus": True,
+            "agent_view_counts": {
+                agent.agent_id: len([e for e in _evidence_pool if e.usable_agent == agent.agent_id])
+                for agent in agents
+            },
+        },
         "protocol": {
             "current_motion": motion.content if motion else "",
             "status": _protocol_runtime.current_motion.status.value if _protocol_runtime.current_motion else "idle",

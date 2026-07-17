@@ -47,6 +47,7 @@ class EvidenceSourceType(str, Enum):
     NEWS = "news"
     ACADEMIC = "academic"
     COURT_CASE = "court_case"
+    EXTERNAL_CASE = "external_case"
 
 
 @dataclass

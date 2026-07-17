@@ -11,3 +11,9 @@ streamlit>=1.28.0
 # LLM (install as needed)
 # openai>=1.0.0       # For OpenAI / OpenAI-compatible APIs
 # anthropic>=0.30.0   # For Anthropic Claude API
+
+# Local case RAG (install before running scripts/build_knowledge_index.py)
+sentence-transformers>=3.0
+torch>=2.2
+numpy>=1.26
+faiss-cpu>=1.8
