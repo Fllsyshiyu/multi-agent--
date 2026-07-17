@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from ma_deliberation_demo.topic import analyze_topic, compute_complexity
 from ma_deliberation_demo.agents import load_archetypes, generate_agents, get_agent_prompt, load_deliberation_sop
+from ma_deliberation_demo.role_planner import plan_roles
 from ma_deliberation_demo.evidence import load_evidence, retrieve_for_agent, format_evidence_context
 from ma_deliberation_demo.knowledge import load_knowledge_config, load_knowledge_retriever
 from ma_deliberation_demo.schemas import DeliberationState, Utterance
@@ -76,6 +77,7 @@ _deliberation_config: dict = {}  # stores mode, model, api_keys from last reques
 _protocol_runtime: ProtocolRuntime | None = None
 _knowledge_config = None
 _knowledge_retriever = None
+_role_plan = None
 
 # ── Model → (provider, base_url) mapping ──────────────────────────────────
 
@@ -176,7 +178,7 @@ class DeliberationRequest(BaseModel):
 async def start_deliberation(req: DeliberationRequest):
     """Initialize a new SOP deliberation session."""
     global _current_state, _topic_analysis, _message_pool, _deliberation_config, _protocol_runtime
-    global _evidence_pool, _knowledge_retriever
+    global _evidence_pool, _knowledge_retriever, _role_plan
 
     # Save deliberation config for stream use
     _deliberation_config = {
@@ -191,8 +193,8 @@ async def start_deliberation(req: DeliberationRequest):
 
     _topic_analysis = analyze_topic(req.topic)
     complexity = compute_complexity(_topic_analysis)
-    archetypes = load_archetypes()
-    agents = generate_agents(req.topic, _topic_analysis, archetypes)
+    _role_plan = plan_roles(req.topic, _topic_analysis)
+    agents = generate_agents(req.topic, _topic_analysis, role_plan=_role_plan)
 
     # Start every session from the static CSV cards, then add one dedicated
     # RAG window per agent. The corpus is shared; the scoped usable_agent ID
@@ -216,6 +218,16 @@ async def start_deliberation(req: DeliberationRequest):
     # Initialize message pool with subscriptions
     _message_pool = MessagePool()
     for agent in agents:
+        if agent.role_kind:
+            dynamic_subscription = {
+                "affected": "vulnerable_group",
+                "expert": "expert",
+                "governance": "manager",
+                "beneficiary": "business",
+                "implementation": "resident",
+            }.get(agent.role_kind, "resident")
+            _message_pool.subscribe_by_archetype(agent.agent_id, dynamic_subscription)
+            continue
         # Map archetype to subscription type
         arch = agent.archetype
         sub_type = "resident"
@@ -248,6 +260,8 @@ async def start_deliberation(req: DeliberationRequest):
     # LLM, owns subsequent procedural transitions and the audit trail.
     _protocol_runtime = ProtocolRuntime()
     stakeholders = [a for a in agents if a.archetype not in ("主持人", "评审员")]
+    # Facilitators are procedural roles, never stakeholder participants.
+    stakeholders = [a for a in agents if a.agent_id not in {"agent_host", "agent_reviewer"}]
     motion = None
     if stakeholders:
         motion = _protocol_runtime.open_main_motion(
@@ -272,10 +286,12 @@ async def start_deliberation(req: DeliberationRequest):
                 "id": a.agent_id,
                 "name": a.agent_name,
                 "archetype": a.archetype,
+                "role_kind": a.role_kind,
                 "emoji": a.avatar_emoji,
                 "color": a.avatar_color,
                 "stance": a.stance_score,
                 "interests": a.main_interests,
+                "evidence_focus": a.evidence_focus,
                 "evidence_count": len(a.evidence_ids),
                 "is_facilitator": a.archetype in ("主持人", "评审员"),
             }
@@ -284,6 +300,7 @@ async def start_deliberation(req: DeliberationRequest):
         "max_rounds": _deliberation_config["max_rounds"],
         "max_speakers": _deliberation_config["max_speakers"],
         "deliberation_mode": req.deliberation_mode,
+        "role_plan": _role_plan.to_dict(),
         "knowledge_rag": {
             "enabled": bool(_knowledge_retriever and _knowledge_retriever.is_ready),
             "shared_corpus": True,

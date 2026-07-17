@@ -25,7 +25,7 @@ def build_agent_query(agent: AgentCard, topic: str, question: str) -> str:
         role_focus = "证据等级 失败模式 迁移条件 待核验事项 风险"
     return " ".join(part for part in (
         topic, question, agent.archetype, agent.relationship_to_topic,
-        " ".join(agent.main_interests), role_focus,
+        " ".join(agent.main_interests), " ".join(agent.evidence_focus), role_focus,
     ) if part)
 
 

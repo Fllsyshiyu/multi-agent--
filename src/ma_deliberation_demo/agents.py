@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .artifacts import AgentContract
 from .schemas import AgentCard, TopicAnalysis
+from .role_planner import ROLE_KIND_DEFAULTS, RolePlan, plan_roles
 
 # Cache for the SOP document to avoid repeated disk reads
 _sop_cache: str | None = None
@@ -56,71 +57,39 @@ AVATAR_CONFIGS = [
 ]
 
 
-def generate_agents(topic: str, topic_analysis: TopicAnalysis, archetypes: dict | None = None) -> list[AgentCard]:
-    """Generate stakeholder agents for a given topic and its conflict analysis."""
-    if archetypes is None:
-        archetypes = load_archetypes()
+def generate_agents(
+    topic: str,
+    topic_analysis: TopicAnalysis,
+    archetypes: dict | None = None,
+    role_plan: RolePlan | None = None,
+) -> list[AgentCard]:
+    """Materialize the validated, topic-specific role plan into Agent cards.
 
+    ``archetypes`` remains accepted for API compatibility with older callers;
+    role identity now comes from the Role Planner rather than exact YAML names.
+    """
+    del archetypes
+    role_plan = role_plan or plan_roles(topic, topic_analysis)
     agents = []
-
-    # Map conflict parties to archetypes
-    # Preserve the conflict-axis order. A set here previously made agent IDs
-    # depend on hash iteration order, which in turn broke deterministic
-    # Fishbowl rotation and any ID-based audit trail.
-    all_parties: list[str] = []
-    for axis in topic_analysis.conflict_axes:
-        for party in axis.parties:
-            if party not in all_parties:
-                all_parties.append(party)
-
-    archetype_list = archetypes.get("archetypes", [])
-    archetype_by_name = {a.get("name", ""): a for a in archetype_list}
-
-    for i, party in enumerate(all_parties):
-        archetype_info = archetype_by_name.get(party, {})
-        if not archetype_info:
-            # Also try to find by related archetype
-            continue
-
-        avatar = AVATAR_CONFIGS[i % len(AVATAR_CONFIGS)]
-        agent = AgentCard(
-            agent_id=f"agent_{i:03d}",
-            agent_name=archetype_info.get("agent_name", party),
-            archetype=archetype_info.get("archetype_type", "stakeholder"),
-            relationship_to_topic=archetype_info.get("relationship_to_topic", ""),
-            main_interests=archetype_info.get("main_interests", []),
-            possible_stance=archetype_info.get("possible_stance", ""),
-            stance_score=archetype_info.get("default_stance_score", 0.0),
-            can_say=archetype_info.get("can_say", []),
-            cannot_say=archetype_info.get("cannot_say", []),
+    for index, role in enumerate(role_plan.roles):
+        defaults = ROLE_KIND_DEFAULTS[role.role_kind]
+        avatar = AVATAR_CONFIGS[index % len(AVATAR_CONFIGS)]
+        agents.append(AgentCard(
+            agent_id=f"agent_{index:03d}",
+            agent_name=role.role_name,
+            archetype=defaults["archetype"],
+            relationship_to_topic=role.relationship_to_topic,
+            role_kind=role.role_kind,
+            main_interests=list(role.main_interests),
+            evidence_focus=list(role.evidence_focus),
+            possible_stance="根据角色利益与证据形成条件性立场",
+            stance_score=role.stance_score,
+            can_say=list(defaults["can_say"]),
+            cannot_say=list(defaults["cannot_say"]),
             evidence_ids=[],
             avatar_color=avatar["color"],
             avatar_emoji=avatar["emoji"],
-        )
-        agents.append(agent)
-
-    # Add silent stakeholders if not covered
-    for stakeholder in topic_analysis.silent_stakeholders:
-        if not any(stakeholder in a.agent_name for a in agents):
-            s_archetype = archetype_by_name.get(stakeholder, {})
-            if not s_archetype:
-                continue
-            avatar = AVATAR_CONFIGS[len(agents) % len(AVATAR_CONFIGS)]
-            agent = AgentCard(
-                agent_id=f"agent_{len(agents):03d}",
-                agent_name=s_archetype.get("agent_name", stakeholder),
-                archetype=s_archetype.get("archetype_type", "silent_stakeholder"),
-                relationship_to_topic=s_archetype.get("relationship_to_topic", ""),
-                main_interests=s_archetype.get("main_interests", []),
-                possible_stance=s_archetype.get("possible_stance", ""),
-                stance_score=s_archetype.get("default_stance_score", 0.0),
-                can_say=s_archetype.get("can_say", []),
-                cannot_say=s_archetype.get("cannot_say", []),
-                evidence_ids=[],
-                avatar_color=avatar["color"],
-                avatar_emoji=avatar["emoji"],
-            )
-            agents.append(agent)
+        ))
 
     # Add facilitator agents: Host (主持人) and Reviewer (评审员)
     facilitator_avatar_idx = len(agents)
