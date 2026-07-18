@@ -42,7 +42,7 @@ from ma_deliberation_demo.fishbowl import (
     order_inner_circle_speakers,
 )
 from ma_deliberation_demo.validators import (
-    validate_all, should_revise,
+    validate_all, validate_deliberation_substance, should_revise,
     gate_role_boundary, gate_evidence, gate_conflict_coverage,
     gate_minority_retention, gate_proposal_review,
 )
@@ -1037,6 +1037,10 @@ async def _stream_sop():
         # Signal API mode to frontend
         yield _sse("api_mode", {"active": use_llm, "mode": deliberation_mode,
                                 "quick_model": quick_model if use_llm else "simulation"})
+        if not use_llm:
+            yield _sse("runtime_warning", {
+                "message": "当前未配置可用模型，正在运行规则模拟。模拟仅用于演示流程，不能形成议事结论、审查通过或投票结果。",
+            })
 
         # ── Phase: S0 Topic Input ──
         yield _sse("phase", {"phase": "S0_topic_input", "label": "S0 议题输入"})
@@ -1110,6 +1114,7 @@ async def _stream_sop():
         host_agent = next((a for a in agents if a.agent_id == "agent_host"), None)
         reviewer_agent = next((a for a in agents if a.agent_id == "agent_reviewer"), None)
         agent_llms = {}  # declared here so accessible after if/else
+        simulation_runtime = not use_llm
 
         if use_llm and host_agent and reviewer_agent:
             # Build per-agent LLM clients
@@ -1120,6 +1125,12 @@ async def _stream_sop():
                     expert_api_keys,
                 )
                 agent_llms[agent.agent_id] = llm
+
+            if any(getattr(llm, "is_simulation", False) for llm in agent_llms.values()):
+                simulation_runtime = True
+                yield _sse("runtime_warning", {
+                    "message": "部分模型不可用，已降级为规则模拟。模拟结果不得作为议事结论、审查通过或投票依据。",
+                })
 
             # Run LLM-driven fishbowl and emit events
             all_cards = []
@@ -1310,14 +1321,24 @@ async def _stream_sop():
                 if rs != -1 and re != -1 and re > rs:
                     json_text = json_text[rs:re + 1]
                 parsed = json.loads(json_text)
-                if isinstance(parsed, dict):
-                    review_issues = parsed.get("issues", [])
-                    review_recommendation = parsed.get("recommendation", "pass")
-                    review_detail = parsed.get("review_detail", "")
+                recommendation = parsed.get("recommendation") if isinstance(parsed, dict) else None
+                issues = parsed.get("issues") if isinstance(parsed, dict) else None
+                detail = parsed.get("review_detail") if isinstance(parsed, dict) else None
+                if (
+                    recommendation in {"pass", "revise", "reject"}
+                    and isinstance(issues, list)
+                    and isinstance(detail, str)
+                    and len(detail.strip()) >= 20
+                ):
+                    review_issues = [str(issue) for issue in issues]
+                    review_recommendation = recommendation
+                    review_detail = detail
                     pr_scores = parsed.get("public_resource_scores", {})
                     uv_result = parsed.get("universalization_result", {})
-                    minority_ok = parsed.get("minority_retention_ok", True)
+                    minority_ok = bool(parsed.get("minority_retention_ok", False))
                     review_llm_success = True
+                else:
+                    raise ValueError("review response does not satisfy the review JSON contract")
             except Exception as e:
                 print(f"[LLM] Proposal review FAILED: {e}, using fallback", flush=True)
 
@@ -1357,6 +1378,23 @@ async def _stream_sop():
         # ── Phase: S11 Validation ──
         yield _sse("phase", {"phase": "S11_vote", "label": "S11 校验与投票"})
 
+        evidence_ids = [getattr(e, 'evidence_id', '') for e in _evidence_pool]
+        deliberation_quality = validate_deliberation_substance(
+            all_cards, round_summaries, conflict, evidence_ids,
+        )
+        if simulation_runtime:
+            deliberation_quality.consistency_errors.append(
+                "讨论实质性不足：当前运行在规则模拟模式，不能形成议事结论、审查通过或投票结果"
+            )
+        if deliberation_quality.consistency_errors:
+            yield _sse("gate_result", {
+                "gate_name": "Deliberation Substance Gate",
+                "stage_id": "S11",
+                "status": "revise",
+                "issues": deliberation_quality.consistency_errors,
+                "required_action": ["补充具体主张、可核验证据和明确的分歧回应后重新议事"],
+            })
+
         if _protocol_runtime:
             procedural_gate = gate_procedural_readiness(
                 _protocol_runtime, round_summaries[-1] if round_summaries else None,
@@ -1371,7 +1409,8 @@ async def _stream_sop():
             # A vote is only a simulated preference distribution. It is gated
             # behind minority and evidence readiness and is never presented as
             # public consent or a legally binding decision.
-            if procedural_gate.status == "pass" and host_agent:
+            if (procedural_gate.status == "pass" and not deliberation_quality.consistency_errors
+                    and review_recommendation == "pass" and host_agent):
                 summary = round_summaries[-1] if round_summaries else None
                 start = len(_protocol_runtime.events)
                 _protocol_runtime.close_debate(
@@ -1403,8 +1442,14 @@ async def _stream_sop():
             round_summaries=round_summaries,
             conflict_matrix=conflict,
             hard_constraints=_get_default_constraints(),
-            evidence_ids=[getattr(e, 'evidence_id', '') for e in _evidence_pool],
+            evidence_ids=evidence_ids,
         )
+        if simulation_runtime:
+            simulation_error = "讨论实质性不足：当前运行在规则模拟模式，不能形成议事结论、审查通过或投票结果"
+            if simulation_error not in result.consistency_errors:
+                result.consistency_errors.append(simulation_error)
+            result.passed = False
+            result.revision_instructions.append("配置并验证真实模型后，重新开展实质讨论与方案审查")
         yield _sse("validation", {
             "passed": result.passed,
             "hard_constraint_errors": result.hard_constraint_errors,
@@ -1454,8 +1499,13 @@ async def _stream_sop():
                     if p_start != -1 and p_end != -1 and p_end > p_start:
                         json_text = json_text[p_start:p_end + 1]
                     parsed = json.loads(json_text)
-                    if isinstance(parsed, dict) and parsed.get("content"):
-                        proposal.content = parsed["content"]
+                    revised_content = parsed.get("content") if isinstance(parsed, dict) else ""
+                    if (
+                        isinstance(revised_content, str)
+                        and len(revised_content.strip()) >= 120
+                        and not revised_content.lstrip().startswith(("我是", "作为", "【规则模拟"))
+                    ):
+                        proposal.content = revised_content
                         revision_success = True
                         print(f"[LLM] Proposal revision OK", flush=True)
                 except Exception as e:
@@ -1486,6 +1536,7 @@ async def _stream_sop():
                 round_summaries=round_summaries,
                 conflict_matrix=conflict,
                 hard_constraints=_get_default_constraints(),
+                evidence_ids=evidence_ids,
             )
             yield _sse("validation", {
                 "passed": result2.passed,
@@ -1818,41 +1869,55 @@ def _build_initial_proposal(
             if p_start != -1 and p_end != -1 and p_end > p_start:
                 json_text = json_text[p_start:p_end + 1]
             parsed = json.loads(json_text)
-            if isinstance(parsed, dict):
+            required_text_fields = ("title", "content", "timeline", "resources", "risks")
+            has_required_fields = (
+                isinstance(parsed, dict)
+                and all(isinstance(parsed.get(field), str) and parsed[field].strip() for field in required_text_fields)
+                and isinstance(parsed.get("evaluation_criteria"), list)
+                and len(parsed.get("content", "").strip()) >= 120
+                and not parsed.get("content", "").lstrip().startswith(("我是", "作为", "【规则模拟"))
+            )
+            if has_required_fields:
                 proposal_title = parsed.get("title", proposal_title)
                 proposal_content = parsed.get("content", "")
                 proposal_timeline = parsed.get("timeline", proposal_timeline)
                 proposal_resources = parsed.get("resources", proposal_resources)
                 proposal_risks = parsed.get("risks", proposal_risks)
                 proposal_criteria = parsed.get("evaluation_criteria", proposal_criteria)
+            else:
+                raise ValueError("proposal response does not satisfy the proposal JSON contract")
         except Exception as e:
             print(f"[LLM] Proposal generation FAILED: {e}, using template", flush=True)
 
-    # ── Fallback template content ──
+    # ── Topic-neutral fallback template content ──
     if not proposal_content:
-        proposal_content = f"""基于{topic}的议事讨论，提出以下试点治理方案：
+        proposal_content = f"""基于“{topic}”的讨论记录，现阶段仅形成可继续审议的条件化草案，不构成最终公共决策。
 
 ## 核心原则
-试点而非一刀切，用数据驱动决策替代立场之争。
+先核验事实，再比较方案；保留不同群体的底线与风险；以可退出、可复盘的试点代替一次性定论。
 
-## 具体措施
-1. 划定摊位边界线和经营时间（冬季22:00/夏季22:30闭市）
-2. 建立摊位编号制度，每摊负责自清垃圾
-3. 设立卫生押金和环卫附加费机制
-4. 制定量化KPI：夜间投诉下降50%、环卫评分C级以上、消防通道无占用
-5. 建立投诉快速响应渠道和退出机制
+## 建议的后续动作
+1. 明确本议题涉及的空间、时间、资源与权利边界，并公开记录。
+2. 对各方主张逐条补充可核验的事实、来源和适用条件。
+3. 围绕分歧设置小范围、限期、可暂停的试点，而非直接作永久安排。
+4. 指定协调责任方，建立公开反馈、申诉和定期复盘机制。
+5. 在试点结束后，依据事先公布的指标决定调整、延续或退出。
 
-## 多数意见采纳
-{chr(10).join(f'- {v[:100]}' for v in all_majority[:3])}
+## 已记录的观点
+{chr(10).join(f'- {v[:100]}' for v in all_majority[:3]) or '- 尚未形成可确认的多数观点'}
 
-## 少数意见保留
-{chr(10).join(f'- {v[:100]}' for v in all_minority[:2])}
+## 仍需保留的分歧
+{chr(10).join(f'- {v[:100]}' for v in all_minority[:2]) or '- 尚未形成可确认的少数观点；不得据此宣称共识'}
 
-## 待实地调研问题
-- 环卫增额成本实地测算
-- 摊位费标准调研
-- 交通流量基线数据收集
+## 待核验事项
+- 与议题直接相关的本地事实、影响范围和资源成本
+- 各方可接受条件、不可退让底线及相应的补救机制
+- 试点指标、数据来源、复盘时间点与退出条件
 """
+
+    proposal_evidence_ids = list(dict.fromkeys(
+        evidence_id for agent in agents for evidence_id in getattr(agent, "evidence_ids", []) if evidence_id
+    ))
 
     return ProposalCard(
         proposal_id=f"prop_{hash(topic) % 10000:04d}",
@@ -1866,7 +1931,7 @@ def _build_initial_proposal(
         resources=proposal_resources,
         risks=proposal_risks,
         evaluation_criteria=proposal_criteria,
-        evidence_ids=["E-NM-001", "E-NM-005", "E-NM-007"],
+        evidence_ids=proposal_evidence_ids,
     )
 
 

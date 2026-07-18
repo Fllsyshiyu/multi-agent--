@@ -1764,8 +1764,20 @@ async function handleEngineEvent(event) {
       if (event.active) {
         document.getElementById('statusBadge').textContent = '? API ' + (event.quick_model || event.mode || '');
         document.getElementById('statusBadge').className = 'status-badge running';
+      } else {
+        document.getElementById('statusBadge').textContent = '⚠️ 规则模拟（不可作结论）';
+        document.getElementById('statusBadge').className = 'status-badge error';
       }
       break;
+
+    case 'runtime_warning': {
+      const warning = document.createElement('div');
+      warning.className = 'chat-msg facilitator';
+      warning.innerHTML = '<div class="cm-text" style="border-left:3px solid var(--warn);background:rgba(245,158,11,0.1);color:var(--warn)"></div>';
+      warning.querySelector('.cm-text').textContent = '⚠️ ' + (event.message || '运行时已降级为规则模拟');
+      addToStage(warning);
+      break;
+    }
 
     case 'phase':
     case 'sop_phase':

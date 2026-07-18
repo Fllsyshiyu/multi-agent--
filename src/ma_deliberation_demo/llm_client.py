@@ -223,7 +223,33 @@ class SimulationClient(LLMClient):
     to the same situation based on its own interests and constraints.
     """
 
+    # A rule-based fallback is useful for demonstrations, but callers must be
+    # able to distinguish it from a live model.
+    is_simulation = True
+
     def chat(self, messages: list[dict], system: str = "", json_mode: bool = False) -> str:
+        user_text = "\n".join(str(message.get("content", "")) for message in messages)
+        task = self._detect_task(user_text)
+
+        # Proposal, review, revision, and report prompts have incompatible JSON
+        # contracts.  Previously this client returned a speech object for every
+        # task, allowing an identity statement to become a proposal and a missing
+        # review recommendation to silently default to "pass".
+        if task == "proposal":
+            return json.dumps(self._simulation_proposal(user_text), ensure_ascii=False)
+        if task == "review":
+            return json.dumps(self._simulation_review(), ensure_ascii=False)
+        if task == "revision":
+            return json.dumps({
+                "content": "【规则模拟】无法代替模型或人工对方案作实质修订；请补充有效讨论与证据后重新生成。",
+            }, ensure_ascii=False)
+        if task == "report":
+            return json.dumps({
+                "executive_summary": "【规则模拟】本轮未调用真实语言模型，不能据此形成公共事务结论。",
+                "recommendations": ["配置并验证模型后重新开展讨论", "补充可核验的事实材料与证据引用"],
+                "minority_preservation": "规则模拟不构成对少数意见的实质记录。",
+            }, ensure_ascii=False)
+
         # Extract context from the system prompt and messages
         agent_name = self._extract_field(system, "名称：", "")
         agent_archetype = self._extract_field(system, "身份：", "")
@@ -237,10 +263,10 @@ class SimulationClient(LLMClient):
         last_content = ""
         for m in reversed(messages):
             content = m.get("content", "")
-            if content.startswith("[") and "]:" in content:
-                bracket_end = content.index("]:")
-                last_speaker = content[1:bracket_end]
-                last_content = content[bracket_end + 2:].strip()
+            match = re.search(r"\[([^\]]+)\]:\s*([^\n]+)", content)
+            if match:
+                last_speaker = match.group(1).strip()
+                last_content = match.group(2).strip()
                 break
 
         # Extract evidence from system prompt
@@ -248,7 +274,7 @@ class SimulationClient(LLMClient):
         evidence_quotes = []
         for line in system.split("\n"):
             if "证据" in line and "来源" in line:
-                match = re.search(r'\[证据\s*(\d+)\]\s*(E-[\w-]+)', line)
+                match = re.search(r'\[证据\s*(\d+)\]\s*([\w:-]+)', line)
                 if match:
                     evidence_ids.append(match.group(2))
             if "原文引用：" in line:
@@ -268,10 +294,54 @@ class SimulationClient(LLMClient):
             evidence_quotes=evidence_quotes,
             can_say=can_say,
             cannot_say=cannot_say,
-            turn_count=sum(1 for m in messages if m.get("content", "").startswith("[")),
+            turn_count=len(re.findall(r"\[[^\]]+\]:", user_text)),
         )
 
         return response
+
+    @staticmethod
+    def _detect_task(user_text: str) -> str:
+        """Classify the requested JSON contract before composing a response."""
+        if "required_revisions" in user_text and "recommendation" in user_text:
+            return "review"
+        if "evaluation_criteria" in user_text and "方案正文" in user_text:
+            return "proposal"
+        if "修订后的完整方案正文" in user_text:
+            return "revision"
+        if "executive_summary" in user_text and "recommendations" in user_text:
+            return "report"
+        return "speech"
+
+    @staticmethod
+    def _simulation_proposal(user_text: str) -> dict:
+        """Return a correctly typed non-final draft in rule simulation mode."""
+        topic_match = re.search(r"##\s*议题\s*\n([^\n]+)", user_text)
+        topic = topic_match.group(1).strip() if topic_match else "当前议题"
+        return {
+            "title": f"关于{topic[:24]}的待补证据草案",
+            "content": (
+                "【规则模拟草案，禁止作为结论】当前未获得真实语言模型的实质论证输出。"
+                "在补充利益相关方的具体主张、可核验证据、分歧回应及实施条件前，"
+                "本系统只能登记待讨论事项，不能形成治理方案或公共决策建议。"
+            ),
+            "timeline": "待模型讨论与事实核验完成后确定",
+            "resources": "待核验：组织协调、事实调研、记录与反馈渠道",
+            "risks": "缺少实质讨论和证据时，任何具体治理措施均可能误判实际情况",
+            "evaluation_criteria": ["每个关键主张均有可追溯证据", "主要分歧得到明确记录"],
+        }
+
+    @staticmethod
+    def _simulation_review() -> dict:
+        """A simulation must block, rather than auto-approve, proposal review."""
+        return {
+            "issues": ["当前使用规则模拟回退，未形成可供审查的真实模型讨论与方案输出。"],
+            "public_resource_scores": {},
+            "universalization_result": {"status": "fail", "reason": "缺少可验证的实质讨论"},
+            "minority_retention_ok": False,
+            "required_revisions": ["配置可用模型并补充证据后重新开展议事"],
+            "recommendation": "revise",
+            "review_detail": "规则模拟只能演示流程，不能替代方案审查；本次结果不得标记为通过。",
+        }
 
     @staticmethod
     def _extract_field(text: str, prefix: str, default: str = "") -> str:
@@ -287,6 +357,9 @@ class SimulationClient(LLMClient):
         for line in text.split("\n"):
             if prefix in line:
                 in_section = True
+                inline = line.split(prefix, 1)[1].strip()
+                if inline:
+                    items.extend(item.strip() for item in re.split(r"[，,；;]", inline) if item.strip())
                 continue
             if in_section:
                 stripped = line.strip().lstrip("- ")
@@ -353,21 +426,38 @@ class SimulationClient(LLMClient):
         return json.dumps(response_obj, ensure_ascii=False)
 
     def _opening_statement(self, name: str, archetype: str, interests: list[str], stance: str, quote: str) -> str:
-        templates = {
-            "直接受益者": f"我是{name}。{'，'.join(interests) if interests else ''}。{stance}。"
-                           f"{'根据相关资料，' + quote if quote else '我想先表达我们的基本诉求。'}",
-            "直接受影响者": f"作为{name}，我想先说明我们面临的实际问题。{'，'.join(interests) if interests else ''}。"
-                           f"{stance}。{'有记录显示：' + quote if quote else '我希望各方能理解我们的处境。'}",
-            "治理方": f"作为{name}，我们的职责是平衡各方诉求、依法管理。{stance}。"
-                      f"{'根据相关政策：' + quote if quote else '我们需要在法规框架下寻找可行方案。'}",
-            "间接影响者": f"我是{name}。虽然我们不常被听见，但这件事直接影响我们的工作。"
-                          f"{'，'.join(interests) if interests else ''}。{'有数据显示：' + quote if quote else ''}",
-            "间接受益者": f"作为{name}，我想从一个可能被忽略的角度补充。{'，'.join(interests) if interests else ''}。"
-                          f"{stance}。",
-            "专业观察者": f"作为{name}，我从中立专业角度提出建议。{stance}。"
-                          f"{'有研究指出：' + quote if quote else '我建议我们从数据出发来讨论。'}",
+        # Dynamic role planning uses more precise role names than the legacy
+        # demo. Normalize them here so the simulation remains a meaningful
+        # fallback instead of printing "我是… + 基本立场" verbatim.
+        aliases = {
+            "直接受益方": "直接受益者",
+            "直接受影响方": "直接受影响者",
+            "治理与执行方": "治理方",
+            "一线实施与运维方": "间接影响者",
+            "专业与证据角色": "专业观察者",
         }
-        return templates.get(archetype, f"我是{name}。{stance}。")
+        archetype = aliases.get(archetype, archetype)
+        core_interest = interests[0] if interests else "与议题相关的实际影响"
+        templates = {
+            "直接受益者": f"我们关注{core_interest}。我主张保留合理空间，但前提是把对他人的影响、可执行边界和责任写清楚。"
+                           f"{'可参考材料：' + quote if quote else '请先核验实际需求与承受的成本。'}",
+            "直接受影响者": f"我们首先要回应{core_interest}带来的具体影响。任何安排都应设置可投诉、可复核、可退出的保障条件。"
+                           f"{'现有材料提示：' + quote if quote else '在事实未核验前，不能把影响视为可以忽略。'}",
+            "治理方": f"治理上需要同时处理{core_interest}和各方权利边界。建议将争议拆成可执行的条件、责任主体和复盘节点。"
+                      f"{'相关材料：' + quote if quote else '先以小范围试点和公开反馈来检验方案。'}",
+            "间接影响者": f"从实施和运维角度，{core_interest}会影响日常资源与执行成本。"
+                          f"建议把人力、时间和风险写入方案后再讨论是否推进。{'材料依据：' + quote if quote else ''}",
+            "间接受益者": f"除了直接参与者，还应考虑{core_interest}这一容易被忽略的影响。"
+                          "我支持在明确边界、透明监督和定期评估的条件下寻找折中安排。",
+            "专业观察者": f"从证据与评估角度，{core_interest}需要先转化为可观察指标。"
+                          f"{'现有材料显示：' + quote if quote else '建议先补齐基线事实，再比较不同方案的风险和收益。'}",
+            "主持人": f"本轮先围绕具体争议与可核验事实展开，不作价值裁决。请各方说明主张、依据、底线及可接受条件，并回应上一位发言者。",
+            "评审员": "目前不形成结论。请检查各方主张是否有依据、是否回应了受影响群体，以及未解决分歧是否被完整记录。",
+        }
+        return templates.get(
+            archetype,
+            f"围绕{core_interest}，我提出一个待核验的具体关注：需要明确实际影响、责任边界和可接受条件，再决定下一步方案。",
+        )
 
     def _responsive_statement(
         self, name: str, archetype: str, interests: list[str], stance: str,
@@ -375,6 +465,13 @@ class SimulationClient(LLMClient):
     ) -> str:
         # Acknowledge previous speaker
         ack = f"我听到了{reply_to}的观点。" if reply_to else "我想回应前面的讨论。"
+
+        aliases = {
+            "直接受益方": "直接受益者", "直接受影响方": "直接受影响者",
+            "治理与执行方": "治理方", "一线实施与运维方": "间接影响者",
+            "专业与证据角色": "专业观察者",
+        }
+        archetype = aliases.get(archetype, archetype)
 
         # Express own perspective based on archetype
         if archetype == "直接受益者":
