@@ -28,6 +28,6 @@ html_content = HTML_PATH.read_text(encoding="utf-8")
 # 全屏渲染 HTML
 st.components.v1.html(
     html_content,
-    height=1080,
+    height=2000,
     scrolling=True,
 )
