@@ -1,16 +1,61 @@
 """
 多智能体议事厅 · Streamlit 版
-Multi-Agent Deliberation System — streamlit_app.py
-部署到 Streamlit Community Cloud 时，Streamlit 会自动运行此文件。
+部署到 Streamlit Community Cloud 时自动运行。
+内嵌 Tornado API 处理器，前端 fetch 请求直接由本进程响应。
 """
 
 import streamlit as st
 from pathlib import Path
-import sys
+from datetime import datetime
 import json
-import concurrent.futures
+import gc
+import sys
 
-# ── 页面配置 ──────────────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+# ── 内嵌 API 后端 ──
+if "api_registered" not in st.session_state:
+    try:
+        import tornado.web
+        from ma_deliberation_demo.role_assigner import assign_agents_for_topic, FACILITATOR_AGENTS
+
+        class AssignAgentsHandler(tornado.web.RequestHandler):
+            def set_default_headers(self):
+                self.set_header("Access-Control-Allow-Origin", "*")
+                self.set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+                self.set_header("Access-Control-Allow-Headers", "Content-Type")
+            def options(self):
+                self.set_status(204)
+                self.finish()
+            def post(self):
+                try:
+                    body = json.loads(self.request.body)
+                    topic = body.get("topic", "")
+                    result = assign_agents_for_topic(topic)
+                    self.set_header("Content-Type", "application/json")
+                    self.write(json.dumps({
+                        "success": True,
+                        "analysis": result["analysis"],
+                        "agents": result["agents"],
+                        "facilitators": FACILITATOR_AGENTS,
+                    }, ensure_ascii=False))
+                except Exception as e:
+                    self.set_status(500)
+                    self.write(json.dumps({"success": False, "error": str(e)}))
+
+        found = False
+        for obj in gc.get_objects():
+            if isinstance(obj, tornado.web.Application):
+                try:
+                    obj.add_handlers(r".*", [(r"/api/topic/assign_agents", AssignAgentsHandler)])
+                    found = True
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[API] Registration failed (non-fatal): {e}", flush=True)
+    st.session_state.api_registered = True
+
+# ── 页面配置 ──
 st.set_page_config(
     page_title="多智能体议事厅",
     page_icon="🏛️",
@@ -18,86 +63,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── 确保 src 可导入 ─────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent))
+st.markdown(
+    '<div style="text-align:center;padding:5px;background:#10b981;color:#000;font-size:12px;font-weight:700">'
+    '✅ v6-main · ' + datetime.now().strftime('%Y-%m-%d %H:%M') + ' · API内嵌 · 角色分配可用'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
-# ── 在进程内调用 FastAPI（不启动服务器、不走网络）─────────────
-def _run_deliberation_in_process(topic, mode, quick_model, expert_models, api_keys, expert_api_keys):
-    """Use httpx.ASGITransport to call the FastAPI app in-process.
-    Returns (session_id, list_of_events)."""
-    import asyncio as _asyncio
-    import httpx
-    from api.main import app as fastapi_app
-
-    async def _run():
-        transport = httpx.ASGITransport(app=fastapi_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://_", timeout=600) as client:
-            resp = await client.post("/api/deliberation/start", json={
-                "topic": topic, "question": "",
-                "deliberation_mode": mode,
-                "quick_model": quick_model,
-                "expert_models": expert_models,
-                "api_keys": api_keys,
-                "expert_api_keys": expert_api_keys,
-            })
-            resp.raise_for_status()
-            session_id = resp.json().get("session_id", "")
-
-            events = []
-            async with client.stream("GET", "/api/deliberation/stream") as stream:
-                async for line in stream.aiter_lines():
-                    if line.startswith("data: "):
-                        data = line[6:]
-                        if data == "[DONE]":
-                            break
-                        try:
-                            events.append(json.loads(data))
-                        except json.JSONDecodeError:
-                            pass
-            return {"session_id": session_id, "events": events}
-
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        return pool.submit(_asyncio.run, _run()).result(timeout=600)
-
-# ── 加载并渲染前端 HTML ──────────────────────────────────
 HTML_PATH = Path(__file__).parent / "frontend" / "index.html"
-
 if not HTML_PATH.exists():
     st.error(f"Cannot find: {HTML_PATH}")
     st.stop()
 
 html_content = HTML_PATH.read_text(encoding="utf-8")
-
-# ── 注入预计算的结果（如果有）──────────────────────────────────
-if "deliberation_result" in st.session_state and st.session_state.deliberation_result is not None:
-    result = st.session_state.deliberation_result
-    result_json = json.dumps(result)
-    injection = f"<script>window.__DELIBERATION_RESULT__={result_json};</script>"
-    html_content = injection + "\n" + html_content
-    st.session_state.deliberation_result = None
-
-# ── 渲染组件 ──────────────────────────────────────────────
-# Render HTML inline — no iframe, no sandbox, JS runs in page context
-st.html(html_content)
-
-# ── 处理前端发来的议事请求（通过 URL query param）────────────
-_payload_raw = st.query_params.get("_st_payload", "")
-if _payload_raw:
-    try:
-        payload = json.loads(_payload_raw)
-    except json.JSONDecodeError:
-        payload = {}
-    st.query_params.clear()
-
-    if payload.get("_st_action") == "run_deliberation":
-        with st.spinner("🤖 多智能体议事进行中，请稍候..."):
-            result = _run_deliberation_in_process(
-                payload.get("topic", ""),
-                payload.get("mode", "quick"),
-                payload.get("quick_model", "deepseek-v4-pro"),
-                payload.get("expert_models", {}),
-                payload.get("api_keys", {}),
-                payload.get("expert_api_keys", {}),
-            )
-        st.session_state.deliberation_result = result
-        st.rerun()
+st.components.v1.html(html_content, height=2000, scrolling=True)

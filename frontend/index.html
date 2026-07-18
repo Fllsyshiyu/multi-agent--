@@ -479,7 +479,9 @@ if (location.protocol === 'file:') {
   <div class="ocard">
     <h2>? 多智能体<span>议事厅</span></h2>
     <p class="sub">SOP 驱动 · 鱼缸讨论 · 结构化工件<br>面向社区公共空间治理</p>
-    <input type="text" id="topicInput" value="小区门口夜市是否应该保留？" placeholder="输入议题...">
+    <div class="topic-input-row"><input type="text" id="topicInput" value="小区门口夜市是否应该保留？" placeholder="输入议题..."><button class="btn-check" id="btnCheckTopic" title="角色分配agent：分析议题并分配角色" onclick="assignRolesForTopic()">✓</button></div>
+    <div class="assign-status" id="assignStatus"></div>
+    <div class="assign-analysis" id="assignAnalysis" style="display:none"></div>
     <div class="presets">
       <button class="preset" data-topic="小区门口夜市是否应该保留？">? 夜市治理</button>
       <button class="preset" data-topic="老旧小区广场舞是否应该继续？">? 广场舞争议</button>
@@ -590,7 +592,7 @@ if (location.protocol === 'file:') {
       </div>
     </div>
 
-    <button class="btn pri" id="btnEnter" style="width:100%;justify-content:center;padding:12px;font-size:14px">
+    <button class="btn pri" id="btnEnter" style="width:100%;justify-content:center;padding:12px;font-size:14px" disabled>
       ? 进入议事厅
     </button>
     <p style="font-size:9px;color:var(--muted);margin-top:10px" id="modeHint">
@@ -624,27 +626,6 @@ window.addEventListener('unhandledrejection', function(e) {
   }
   console.error('Unhandled rejection:', e.reason);
 });
-
-// ─── API URL helper ───────────────────────────────────────────
-function apiUrl(path) {
-  var base = window.API_BASE;
-  if (base === undefined || base === null || base === '') {
-    // Autodetect: if we can't determine the base URL,
-    // try document.referrer (works in srcdoc iframes on some browsers)
-    // or fall back to the known cloud URL.
-    var ref = document.referrer || '';
-    var m = ref.match(/^https?:\/\/[^\/]+/);
-    if (m) { base = m[0]; }
-    else if (typeof window.__CLOUD === 'undefined' || window.__CLOUD === 1) {
-      base = 'https://multi-agent-yishi.streamlit.app';
-    } else {
-      base = 'http://localhost:8765';
-    }
-    console.warn('[apiUrl] API_BASE auto-detected as', base, '(API_BASE was', window.API_BASE, ')');
-    window.API_BASE = base;
-  }
-  return base + path;
-}
 
 // ============================================================
 // MULTI-AGENT DELIBERATION ENGINE (embedded, real-time)
@@ -733,7 +714,7 @@ const ARCHETYPE_CONFIGS = {
 // ============================================================
 // AGENTS & SOP
 // ============================================================
-const AGENTS = [
+let AGENTS = [
   { id:'a0', name:'夜市摊贩代表', role:'直接受益者', emoji:'🍜', color:'#f59e0b', bg:'#fef3c7', stance:0.8, isFacilitator:false, archetypeKey:'直接受益者',
     interests:['保留经营机会','获得稳定摊位','避免一刀切取缔','参与规则制定'] },
   { id:'a1', name:'周边居民代表', role:'直接受影响者', emoji:'🏠', color:'#ef4444', bg:'#fee2e2', stance:-0.7, isFacilitator:false, archetypeKey:'直接受影响者',
@@ -1058,7 +1039,7 @@ function validateProposal() {
 async function* runDeliberation(topic) {
   const topicAnalysis = analyzeTopic(topic);
   const speakCounts = {};
-  AGENTS.forEach(a => { speakCounts[a.id] = 0; });
+  AGENTS.filter(a => !a.isFacilitator).forEach(a => { speakCounts[a.id] = 0; });
 
   const allDialogue = [];
   const roundSummaries = [];
@@ -1164,7 +1145,7 @@ async function* runDeliberation(topic) {
 // ============================================================
 let running = false;
 let timer = null;
-let collectedData = { agents:[], fishbowl:[], dialogue:[], summaries:[], conflict:null, proposal:null, review:null, validation:null, currentRound:0, speakCounts:{}, deliberationPlans:[], outerObservations:[], observerSnapshots:[], gateResults:[], reviewCards:[], proceduralEvents:[], protocol:null, executiveSummary:'', recommendations:[] };
+let collectedData = { agents:[], fishbowl:[], dialogue:[], summaries:[], conflict:null, proposal:null, review:null, validation:null, currentRound:0, speakCounts:{}, deliberationPlans:[], outerObservations:[], observerSnapshots:[], gateResults:[], reviewCards:[], executiveSummary:'', recommendations:[] };
 
 // ============================================================
 // UI: SOP BAR
@@ -1192,9 +1173,193 @@ function updateSopPhase(phaseId) {
 // ============================================================
 // UI: INIT
 // ============================================================
+
+// ============================================================
+// ── Local agent generation (used when API is unavailable, e.g. Streamlit Cloud) ──
+const LOCAL_AGENT_PROFILES = {
+  '夜市': [
+    {name:'夜市摊贩代表',role:'直接受益者',emoji:'🍜',color:'#f59e0b',stance:0.8,interests:['保留经营机会','获得稳定摊位','避免一刀切取缔','参与规则制定']},
+    {name:'周边居民代表',role:'直接受影响者',emoji:'🏠',color:'#ef4444',stance:-0.7,interests:['保障居住环境质量','明确闭市时间和噪声管控','建立投诉响应机制','确保消防和通行安全']},
+    {name:'夜间消费者代表',role:'间接受益者',emoji:'🛍️',color:'#8b5cf6',stance:0.5,interests:['保留便利低价消费选择','合理的营业时间','食品安全和卫生','多样化业态']},
+    {name:'街道办治理人员',role:'治理方',emoji:'🏛️',color:'#3b82f6',stance:0.1,interests:['减少居民投诉','维护公共秩序','落实上级政策','避免极端事件']},
+    {name:'环卫人员代表',role:'间接影响者',emoji:'🧹',color:'#10b981',stance:-0.3,interests:['获得额外清扫经费','合理配置垃圾桶和清运频次','不被转嫁治理成本','劳动条件和安全保障']},
+    {name:'城市设计师',role:'专业观察者',emoji:'📐',color:'#ec4899',stance:0.2,interests:['提出可量化可验证的试点方案','引入国内外空间治理经验','从保留vs取缔转向条件化治理','确保方案可执行可复评']},
+  ],
+  '广场舞': [
+    {name:'广场舞队伍代表',role:'直接受益者',emoji:'💃',color:'#f59e0b',stance:0.8,interests:['保留就近的健身活动空间','获得明确的使用时间安排','不被驱逐或强制迁往远距离场地','参与制定使用规则']},
+    {name:'受噪音影响居民代表',role:'直接受影响者',emoji:'🏠',color:'#ef4444',stance:-0.7,interests:['保障居住环境的安静','明确活动时间和音量限制','建立投诉和调解机制','确保休息时段不受干扰']},
+    {name:'其他空间使用者代表',role:'直接受影响者',emoji:'🚶',color:'#8b5cf6',stance:-0.5,interests:['确保公共空间的多样化使用','获得安静休息和散步的空间','明确各时段的空间使用分配','儿童和家庭活动场地的保障']},
+    {name:'物业管理人员',role:'治理方',emoji:'🏛️',color:'#3b82f6',stance:0.1,interests:['减少居民投诉','维护公共空间秩序','探索公平的使用规则','避免矛盾升级']},
+    {name:'居家工作者代表',role:'间接影响者',emoji:'💻',color:'#10b981',stance:-0.4,interests:['保障日常工作和生活的安静环境','获得明确的活动时间和音量限制','不被忽视作为少数群体的诉求']},
+    {name:'婴幼儿家庭代表',role:'间接影响者',emoji:'👶',color:'#ec4899',stance:-0.5,interests:['保障婴幼儿的安静睡眠环境','活动时间避开晚间婴幼儿入睡时段','音量控制在合理范围']},
+  ],
+  '电梯': [
+    {name:'高楼层住户代表',role:'直接受益者',emoji:'🏢',color:'#f59e0b',stance:0.9,interests:['加装电梯以解决出行困难','公平合理的费用分摊方案','施工期间尽量减少对生活的影响','电梯后续维护费用的合理分配']},
+    {name:'低楼层住户代表',role:'直接受影响者',emoji:'🏘️',color:'#ef4444',stance:-0.6,interests:['评估电梯对采光和通风的实际影响','获得合理的经济补偿','施工期间的居住保障','电梯维护费用的合理分配']},
+    {name:'社区居委会代表',role:'治理方',emoji:'🏛️',color:'#3b82f6',stance:0.1,interests:['协调高低楼层住户的矛盾','确保政策合规落地','组织费用分摊方案协商','监督施工质量和安全']},
+    {name:'建筑设计专家',role:'专业观察者',emoji:'📐',color:'#ec4899',stance:0.2,interests:['评估建筑结构可行性与安全性','提供电梯加装技术方案','量化采光和通风影响','建议最优加装位置']},
+  ],
+};
+
+function generateAgentsLocal(topicInfo) {
+  const keywords = ['广场舞', '夜市', '电梯'];
+  for (const kw of keywords) {
+    if (LOCAL_AGENT_PROFILES[kw] && topicInfo.key === kw) {
+      return LOCAL_AGENT_PROFILES[kw];
+    }
+  }
+  // Generic fallback: 4 generic agents
+  return [
+    {name:'议题相关受益方',role:'直接受益者',emoji:'👤',color:'#f59e0b',stance:0.5,interests:['从议题相关的改变中获益','推动有利于自身的方案']},
+    {name:'议题相关受影响方',role:'直接受影响者',emoji:'🏠',color:'#ef4444',stance:-0.5,interests:['避免议题改变带来的负面影响','保护自身既有权益']},
+    {name:'治理协调方',role:'治理方',emoji:'🏛️',color:'#3b82f6',stance:0.0,interests:['寻求各方可接受的方案','减少冲突和投诉','落实相关政策']},
+    {name:'第三方观察者',role:'专业观察者',emoji:'📊',color:'#ec4899',stance:0.1,interests:['提供客观分析和建议','引入专业知识和经验','确保方案可执行']},
+  ];
+}
+
+
+// ROLE ASSIGNMENT AGENT
+// ============================================================
+let rolesAssigned = false;
+let assignedAgentsData = null;
+
+async function assignRolesForTopic() {
+  const topic = document.getElementById('topicInput').value.trim();
+  if (!topic) return;
+
+  const btn = document.getElementById('btnCheckTopic');
+  const status = document.getElementById('assignStatus');
+  const analysis = document.getElementById('assignAnalysis');
+
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.textContent = '⟳';
+  status.textContent = '角色分配agent正在进行角色分配...';
+  status.className = 'assign-status loading';
+  analysis.style.display = 'none';
+  document.getElementById('btnEnter').disabled = true;
+
+  try {
+    const resp = await fetch('/api/topic/assign_agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic }),
+    });
+    if (!resp.ok) throw new Error('API error: ' + resp.status);
+
+    const data = await resp.json();
+    if (!data.success || !data.agents || data.agents.length < 4) {
+      throw new Error('角色分配agent未能生成足够的角色');
+    }
+
+    assignedAgentsData = data;
+
+    // Update AGENTS array with new agents + facilitators
+    AGENTS.length = 0;
+    data.agents.forEach((a, i) => {
+      AGENTS.push({
+        id: a.id || 'a' + i,
+        name: a.name,
+        role: a.role,
+        emoji: a.emoji || '👤',
+        color: a.color || '#8899b4',
+        bg: a.bg || '',
+        stance: a.stance || 0.0,
+        isFacilitator: false,
+        archetypeKey: a.archetypeKey || a.role || '',
+        interests: a.interests || []
+      });
+    });
+    if (data.facilitators) {
+      data.facilitators.forEach(f => AGENTS.push({...f}));
+    } else {
+      AGENTS.push(
+        {id:'mod',name:'议事主持人',role:'流程引导',emoji:'🎤',color:'#fbbf24',bg:'#fef3c7',stance:0.0,isFacilitator:true,archetypeKey:null,interests:['确保各方发言权平等','引导讨论聚焦方案设计而非立场对抗','cue流程阶段控制发言节奏','观察发言分布调整发言机会']},
+        {id:'rev',name:'议事评审员',role:'质量诊断',emoji:'🔍',color:'#34d399',bg:'#d1fae5',stance:0.0,isFacilitator:true,archetypeKey:null,interests:['评审议事过程是否公平论证是否充分','指出逻辑漏洞证据缺失和讨论盲区','评估各利益群体的讨论质量和参与度','为议事质量改进提供具体建议']}
+      );
+    }
+
+    rolesAssigned = true;
+    btn.classList.remove('loading');
+    btn.classList.add('done');
+    btn.textContent = '✓';
+    status.textContent = '角色分配agent已完成角色分配';
+    status.className = 'assign-status done';
+
+    if (data.analysis) {
+      analysis.textContent = '📋 ' + data.analysis;
+      analysis.style.display = 'block';
+    }
+
+    document.getElementById('btnEnter').disabled = false;
+
+    // Rebuild expert mode list if visible
+    if (currentMode === 'expert') {
+      buildExpertAgentList();
+    }
+
+  } catch (e) {
+    console.warn('API-based role assignment failed, using local fallback:', e.message);
+    // Local fallback for Streamlit Cloud / no-backend scenarios
+    try {
+      const info = analyzeTopic(topic);
+      const localAgents = generateAgentsLocal(info);
+      AGENTS.length = 0;
+      localAgents.forEach((a, i) => {
+        AGENTS.push({
+          id: 'a' + i,
+          name: a.name,
+          role: a.role || '利益相关方',
+          emoji: a.emoji || '👤',
+          color: a.color || '#8899b4',
+          bg: '',
+          stance: a.stance || 0.0,
+          isFacilitator: false,
+          archetypeKey: a.role || '',
+          interests: a.interests || []
+        });
+      });
+      AGENTS.push(
+        {id:'mod',name:'议事主持人',role:'流程引导',emoji:'🎤',color:'#fbbf24',bg:'#fef3c7',stance:0.0,isFacilitator:true,archetypeKey:null,interests:['确保各方发言权平等','引导讨论聚焦方案设计而非立场对抗','cue流程阶段控制发言节奏','观察发言分布调整发言机会']},
+        {id:'rev',name:'议事评审员',role:'质量诊断',emoji:'🔍',color:'#34d399',bg:'#d1fae5',stance:0.0,isFacilitator:true,archetypeKey:null,interests:['评审议事过程是否公平论证是否充分','指出逻辑漏洞证据缺失和讨论盲区','评估各利益群体的讨论质量和参与度','为议事质量改进提供具体建议']}
+      );
+      rolesAssigned = true;
+      btn.classList.remove('loading');
+      btn.classList.add('done');
+      btn.textContent = '✓';
+      document.getElementById('btnEnter').disabled = false;
+      status.textContent = '角色分配agent已完成角色分配（本地模式）';
+      status.className = 'assign-status done';
+      if (currentMode === 'expert') buildExpertAgentList();
+      return;
+    } catch (e2) {
+      console.error('Local fallback also failed:', e2);
+    }
+    btn.classList.remove('loading');
+    btn.textContent = '✗';
+    btn.style.color = 'var(--err)';
+    status.textContent = '角色分配失败：' + e.message;
+    status.className = 'assign-status error';
+    document.getElementById('btnEnter').disabled = true;
+    setTimeout(() => {
+      btn.textContent = '✓';
+      btn.style.color = '';
+      btn.disabled = false;
+      status.textContent = '';
+      status.className = 'assign-status';
+    }, 3000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function initApp() {
   const topic = document.getElementById('topicInput').value.trim();
   if (!topic) return;
+  if (!rolesAssigned) {
+    alert('请先点击议题输入框右侧的 ✓ 按钮，让角色分配agent为您分析议题并分配角色。');
+    return;
+  }
 
   document.getElementById('startOverlay').classList.add('hidden');
   document.getElementById('topicDisplay').textContent = topic;
@@ -1492,9 +1657,7 @@ function renderObserverSnapshot(snap) {
     '<div>speaker: ' + (shares || 'N/A') + '</div>' +
     '<div>evidence-rate: ' + Math.round((snap.grounding_rate || 0) * 100) + '%</div>' +
     '<div>minority-retention: ' + Math.round((snap.minority_retention || 0) * 100) + '%</div>' +
-    '<div>boundary-violations: ' + (snap.role_boundary_violations || 0) + '</div>' +
-    (snap.behavior ? '<div>groupthink-risk: ' + Math.round((snap.behavior.groupthink_risk || 0) * 100) + '% · safety-risk: ' + Math.round((snap.behavior.psychological_safety_risk || 0) * 100) + '%</div>' : '') +
-    '</div>' +
+    '<div>boundary-violations: ' + (snap.role_boundary_violations || 0) + '</div></div>' +
     ((snap.anomaly_flags || []).length ? '<div style="font-size:9px;color:var(--warn)">flags: ' + snap.anomaly_flags.join('; ') + '</div>' : '');
   addToStage(el);
 }
@@ -1507,38 +1670,6 @@ function renderGateResult(gate) {
   el.innerHTML = '<strong>' + si + ' ' + (gate.gate_name || 'Gate') + '</strong>' +
     ((gate.issues || []).length ? '<div style="color:var(--dim);margin:2px 0">' + gate.issues.map(function(i){return '&middot; ' + i;}).join('<br>') + '</div>' : '') +
     ((gate.required_action || []).length ? '<div style="color:var(--accent);font-size:9px">action: ' + gate.required_action.join('; ') + '</div>' : '');
-  addToStage(el);
-}
-
-function renderProtocolState(protocol) {
-  collectedData.protocol = protocol;
-  var el = document.createElement('div');
-  el.className = 'round-summary';
-  el.style.borderLeft = '3px solid var(--accent)';
-  el.innerHTML = '<div class="rs-hd" style="color:var(--accent)">⚖️ 程序状态 — ' + (protocol.status || 'idle') + '</div>' +
-    '<div style="font-size:10px;color:var(--text);margin:4px 0">待决事项：' + (protocol.motion || '暂无') + '</div>' +
-    '<div style="font-size:9px;color:var(--dim)">' + (protocol.notice || '模拟程序记录') + '</div>';
-  addToStage(el);
-}
-
-function renderProceduralEvent(event) {
-  collectedData.proceduralEvents.push(event);
-  var color = event.result === 'accepted' ? 'var(--ok)' : event.result === 'rejected' ? 'var(--err)' : 'var(--warn)';
-  var el = document.createElement('div');
-  el.style.cssText = 'padding:6px 12px;margin:3px 0;border-radius:6px;font-size:10px;background:rgba(255,255,255,.03);border-left:3px solid ' + color;
-  el.innerHTML = '<strong>⚖️ ' + (event.action || 'procedure') + '</strong> · ' + (event.actor_name || '系统') +
-    '<div style="color:var(--dim);margin-top:2px">' + (event.reason || '') + '</div>';
-  addToStage(el);
-}
-
-function renderBehaviorAssessment(assessment) {
-  var el = document.createElement('div');
-  el.className = 'round-summary';
-  el.style.borderLeft = '3px solid var(--warn)';
-  el.innerHTML = '<div class="rs-hd" style="color:var(--warn)">🧭 组织行为观察</div>' +
-    '<div style="font-size:10px;color:var(--dim)">发言支配：' + Math.round((assessment.speaker_dominance || 0) * 100) + '% · 群体迷思风险：' + Math.round((assessment.groupthink_risk || 0) * 100) + '%</div>' +
-    ((assessment.flags || []).length ? '<div style="font-size:9px;color:var(--warn);margin-top:3px">' + assessment.flags.join('；') + '</div>' : '') +
-    ((assessment.interventions || []).length ? '<div style="font-size:9px;color:var(--accent);margin-top:3px">主持干预：' + assessment.interventions.join('；') + '</div>' : '');
   addToStage(el);
 }
 
@@ -1624,14 +1755,102 @@ async function startDeliberation() {
 
   // Choose API or embedded engine based on API key availability
   if (hasApiKeys()) {
+    // Step 1: Validate API keys BEFORE starting
     const statusBadge = document.getElementById('statusBadge');
-    statusBadge.textContent = '⏳ 发起议事请求...';
+    statusBadge.textContent = '⏳ 正在验证 API Key...';
     statusBadge.className = 'status-badge running';
 
-    // Show waiting state
-    document.getElementById('rightStage').innerHTML = '<div class="empty-state"><div style="font-size:32px">⏳</div><div>正在发起议事请求，请稍候...</div></div>';
+    const mode = currentMode;
+    const quickModel = document.getElementById('quickModelSelect')?.value || 'deepseek-v4-pro';
+    const expertModels = {};
+    if (mode === 'expert') {
+      AGENTS.forEach(a => {
+        const sel = document.getElementById('expertModel_' + a.id);
+        if (sel) expertModels[a.id] = sel.value;
+      });
+    }
+    const apiKeys = mode === 'expert' ? {} : getApiKeys();
+    const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
 
-    await startAPIDeliberation();
+    // Debug: show what we are about to send
+    const debugInfo = `[DEBUG] mode=${mode} model=${quickModel} providers=${Object.keys(apiKeys).join(',') || 'none'}`;
+    console.log(debugInfo);
+    document.getElementById('rightStage').innerHTML = '<div class="empty-state"><div style="font-size:32px">⏳</div><div>正在验证 API Key...</div><div style="font-size:10px;color:var(--dim);margin-top:8px">' + debugInfo + '</div></div>';
+
+    let validation = null;
+    try {
+      const vResp = await fetch('/api/deliberation/validate_keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic, question: '',
+          deliberation_mode: mode,
+          quick_model: quickModel,
+          expert_models: expertModels,
+          api_keys: apiKeys,
+          expert_api_keys: expertApiKeys,
+        }),
+      });
+      validation = await vResp.json();
+      // Always log full response for debugging
+      console.log('[VALIDATE RESPONSE]', JSON.stringify(validation));
+    } catch (e) {
+      console.error('Validation request failed:', e);
+      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;text-align:center;"><div style="font-size:48px">❌</div><h3>网络请求失败</h3><p style="color:#ef4444">' + e.message + '</p><p style="color:var(--dim);font-size:10px">请检查是否通过 http://localhost:8765 访问页面</p></div>';
+      running = false;
+      return;
+    }
+
+    if (validation && validation.all_valid) {
+      // All keys valid — proceed with real API
+      statusBadge.textContent = '✅ API Key 验证通过 — 真实API模式';
+      statusBadge.className = 'status-badge running';
+      collectedData.validation = validation;
+      await startAPIDeliberation();
+    } else if (validation && validation.any_valid) {
+      // Partial success — warn but proceed
+      const failed = validation.results.filter(r => !r.valid).map(r => r.model || r.agent_id).join(', ');
+      statusBadge.textContent = '⚠️ 部分Key失败 — 混合模式';
+      statusBadge.className = 'status-badge running';
+      console.warn('Some API keys failed validation:', failed);
+      collectedData.validation = validation;
+      await startAPIDeliberation();
+    } else {
+      // All keys failed — show clear error and block
+      const errMsg = validation ? validation.summary : '无法连接验证服务';
+      const detailLines = validation ? validation.results.map(r =>
+        `  - ${r.model || r.provider}: ${r.error || '未知错误'}`
+      ).join('\n') : '';
+      const sentInfo = `发送配置: mode=${mode} model=${quickModel} key_providers=${Object.keys(apiKeys).join(',') || '无'}`;
+      const rawResponse = validation ? JSON.stringify(validation, null, 2) : 'null';
+      console.error('[VALIDATE FAILED]', rawResponse);
+      statusBadge.textContent = '❌ API Key 验证失败';
+      statusBadge.className = 'status-badge error';
+      document.getElementById('rightStage').innerHTML = `
+        <div class="empty-state" style="padding:40px;text-align:center;">
+          <div style="font-size:48px;margin-bottom:16px;">🔑</div>
+          <h3>API Key 验证失败</h3>
+          <p style="color:#ef4444;max-width:500px;margin:0 auto;">${errMsg}</p>
+          <pre style="text-align:left;max-width:500px;margin:12px auto;color:#6b7280;font-size:13px;">${detailLines}</pre>
+          <p style="color:var(--dim);font-size:11px;margin-top:8px;">${sentInfo}</p>
+          <details style="margin-top:8px;max-width:500px;text-align:left;">
+            <summary style="color:var(--dim);font-size:10px;cursor:pointer;">原始响应 (点击展开)</summary>
+            <pre style="color:#6b7280;font-size:10px;overflow:auto;max-height:200px;">${rawResponse}</pre>
+          </details>
+          <div style="margin-top:20px;display:flex;gap:12px;justify-content:center;">
+            <button onclick="running=false;document.getElementById('btnStart').disabled=false;startDeliberationFallback('${topic.replace(/'/g, "\\'")}')"
+                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">
+              使用模板模拟模式
+            </button>
+            <button onclick="running=false;document.getElementById('btnStart').disabled=false;document.getElementById('statusBadge').textContent='就绪';document.getElementById('statusBadge').className='status-badge';"
+                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">
+              返回修改 Key
+            </button>
+          </div>
+        </div>`;
+      running = false;
+      document.getElementById('btnStart').disabled = false;
+    }
   } else {
     document.getElementById('statusBadge').textContent = '🔄 议事进行中 (模拟模式)...';
     document.getElementById('statusBadge').className = 'status-badge running';
@@ -1798,18 +2017,6 @@ async function handleEngineEvent(event) {
       collectedData.observerSnapshots.push(event.snapshot);
       renderObserverSnapshot(event.snapshot);
       await new Promise(r => { timer = setTimeout(r, 200); });
-      break;
-
-    case 'protocol_state':
-      renderProtocolState(event);
-      break;
-
-    case 'procedural_event':
-      renderProceduralEvent(event);
-      break;
-
-    case 'behavior_assessment':
-      renderBehaviorAssessment(event);
       break;
 
     case 'gate_result':
@@ -2356,12 +2563,9 @@ function loadModeConfig() {
 // API INTEGRATION (backend SSE)
 // ============================================================
 async function startAPIDeliberation() {
-  const API_BASE = "https://multi-agent-api-2heu.onrender.com";
-
   const topic = document.getElementById('topicDisplay').textContent;
   const mode = currentMode;
   const quickModel = document.getElementById('quickModelSelect')?.value || 'deepseek-v4-pro';
-
   const expertModels = {};
   if (mode === 'expert') {
     AGENTS.forEach(a => {
@@ -2370,124 +2574,82 @@ async function startAPIDeliberation() {
     });
   }
 
-  const apiKeys = mode === 'expert' ? {} : getApiKeys();
-  const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
-
-  const body = {
-    topic: topic,
-    question: '',
-    deliberation_mode: mode,
-    quick_model: quickModel,
-    expert_models: expertModels,
-    api_keys: apiKeys,
-    expert_api_keys: expertApiKeys,
-  };
+  // UI already set up by startDeliberation()
 
   try {
-    const sb = document.getElementById('statusBadge');
-    if (sb) {
-      sb.textContent = '正在连接真实 API...';
-      sb.className = 'status-badge running';
-    }
-
-    document.getElementById('rightStage').innerHTML =
-      '<div class="empty-state">' +
-      '<div style="font-size:32px">⏳</div>' +
-      '<div>正在连接后端 API，请稍候...</div>' +
-      '</div>';
-
-    const initResp = await fetch(`${API_BASE}/api/deliberation/start`, {
+    // Step 1: Initialize deliberation session
+    const apiKeys = mode === 'expert' ? {} : getApiKeys();
+    const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
+    const initResp = await fetch('/api/deliberation/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        topic, question: '',
+        deliberation_mode: mode,
+        quick_model: quickModel,
+        expert_models: expertModels,
+        api_keys: apiKeys,
+        expert_api_keys: expertApiKeys,
+      }),
     });
 
-    if (!initResp.ok) {
-      throw new Error('API init error: ' + initResp.status);
-    }
+    if (!initResp.ok) throw new Error('API init error: ' + initResp.status);
+    const initData = await initResp.json();
 
-    await initResp.json();
+    // Show session info in status
+    const modelInfo = mode === 'quick' ? quickModel : (Object.values(expertModels)[0] || '多模型');
+    const sb = document.getElementById('statusBadge');
+    if (sb) { sb.textContent = '🔵 真实API ' + modelInfo; sb.className = 'status-badge running'; }
 
-    if (sb) {
-      sb.textContent = '真实 API 议事中...';
-      sb.className = 'status-badge running';
-    }
-
-    const response = await fetch(`${API_BASE}/api/deliberation/stream`);
-
-    if (!response.ok) {
-      throw new Error('API stream error: ' + response.status);
-    }
+    // Step 2: Stream deliberation via SSE
+    const response = await fetch('/api/deliberation/stream');
+    if (!response.ok) throw new Error('API stream error: ' + response.status);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
-      const result = await reader.read();
+    while (running) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      if (result.done) {
-        break;
-      }
-
-      buffer += decoder.decode(result.value, { stream: true });
-
+      buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        const trimmed = line.trim();
-
-        if (!trimmed.startsWith('data: ')) {
-          continue;
-        }
-
-        const data = trimmed.slice(6);
-
-        if (data === '[DONE]') {
-          finishDeliberation();
-          return;
-        }
-
-        try {
-          const event = JSON.parse(data);
-          await handleEngineEvent(event);
-        } catch (err) {
-          console.error('Bad SSE event:', err, data);
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            await handleEngineEvent(event);
+          } catch (e) { console.error('Event handler error:', e); }
         }
       }
     }
-
-    finishDeliberation();
-  } catch (err) {
-    console.error(err);
-
-    running = false;
-
-    const startBtn = document.getElementById('btnStart');
-    if (startBtn) {
-      startBtn.disabled = false;
+  } catch (e) {
+    console.error('API deliberation error, falling back to embedded engine:', e);
+    var sb2 = document.getElementById('statusBadge');
+    if (sb2) { sb2.textContent = '⚠️ API失败，回退模拟模式'; sb2.className = 'status-badge running'; }
+    // Fallback to embedded engine
+    running = true;
+    const gen = runDeliberation(topic);
+    for await (const event of gen) {
+      if (!running) break;
+      await handleEngineEvent(event);
     }
-
-    const sb = document.getElementById('statusBadge');
-    if (sb) {
-      sb.textContent = 'API 请求失败';
-      sb.className = 'status-badge error';
-    }
-
-    document.getElementById('rightStage').innerHTML =
-      '<div class="empty-state" style="padding:40px;text-align:center;">' +
-      '<div style="font-size:48px">❌</div>' +
-      '<h3>API 请求失败</h3>' +
-      '<p style="color:#ef4444">' + String(err.message || err) + '</p>' +
-      '</div>';
   }
+
+  finishDeliberation();
 }
 
 // ============================================================
 // EVENT BINDINGS
 // ============================================================
 document.getElementById('btnEnter').addEventListener('click', initApp);
+// Auto-assign roles for the default topic on page load
+window.addEventListener('load', () => {
+  setTimeout(() => assignRolesForTopic(), 500);
+});
 document.getElementById('btnStart').addEventListener('click', startDeliberation);
 document.getElementById('btnReport').addEventListener('click', showReport);
 document.getElementById('reportModal').addEventListener('click', e => {
@@ -2511,41 +2673,8 @@ buildExpertAgentList();
 loadModeConfig();
 renderSopBar();
 highlightActiveApiKey();
-
-// ─── Check for pre-computed deliberation results ──────────
-(function checkDeliberationResult() {
-  if (!window.__DELIBERATION_RESULT__) return;
-  var result = window.__DELIBERATION_RESULT__;
-  delete window.__DELIBERATION_RESULT__;
-
-  if (!result || !result.events) {
-    // Error or no events
-    var sb = document.getElementById('statusBadge');
-    if (sb) { sb.textContent = '❌ 议事失败'; sb.className = 'status-badge error'; }
-    if (result && result.error) {
-      document.getElementById('rightStage').innerHTML = '<div class="empty-state" style="padding:40px;"><div style="font-size:48px">❌</div><h3>' + result.error + '</h3></div>';
-    }
-    return;
-  }
-
-  // Process pre-computed events (replay like SSE)
-  var sb = document.getElementById('statusBadge');
-  if (sb) { sb.textContent = '🔵 真实API 议事中...'; sb.className = 'status-badge running'; }
-
-  var events = result.events;
-  var idx = 0;
-  function processNext() {
-    if (idx >= events.length) {
-      finishDeliberation();
-      return;
-    }
-    var event = events[idx++];
-    try { handleEngineEvent(event); } catch(e) { console.error('Event error:', e); }
-    // Small delay for visual playback
-    setTimeout(processNext, 50);
-  }
-  processNext();
-})();
 </script>
+
+<!-- VERSION: role-assigner-v3 -->
 </body>
 </html>

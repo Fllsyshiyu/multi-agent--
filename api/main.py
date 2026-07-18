@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ma_deliberation_demo.topic import analyze_topic, compute_complexity
+from ma_deliberation_demo.role_assigner import assign_agents_for_topic, FACILITATOR_AGENTS
 from ma_deliberation_demo.agents import load_archetypes, generate_agents, get_agent_prompt, load_deliberation_sop
 from ma_deliberation_demo.evidence import load_evidence, retrieve_for_agent, format_evidence_context
 from ma_deliberation_demo.schemas import DeliberationState, Utterance
@@ -37,7 +38,6 @@ from ma_deliberation_demo.fishbowl import (
     select_inner_circle, get_outer_circle,
     run_fishbowl_round_simulation, run_all_fishbowl_rounds,
     generate_deliberation_plan, run_outer_observations, compute_observer_snapshot,
-    order_inner_circle_speakers,
 )
 from ma_deliberation_demo.validators import (
     validate_all, should_revise,
@@ -48,10 +48,6 @@ from ma_deliberation_demo.agents import generate_agent_contract
 from ma_deliberation_demo.message_pool import MessagePool, DEFAULT_SUBSCRIPTIONS
 from ma_deliberation_demo.llm_client import create_llm_client, resolve_api_key, validate_api_key
 from ma_deliberation_demo.sop_runtime import SOPAgentRuntime
-from ma_deliberation_demo.protocols import ProtocolRuntime
-from ma_deliberation_demo.procedural_validators import gate_procedural_readiness
-from ma_deliberation_demo.organizational_behavior import assess_group_dynamics, host_interventions
-from ma_deliberation_demo.boundary_checker import check_interaction_norms
 
 app = FastAPI(
     title="MA Deliberation API — SOP Edition",
@@ -72,7 +68,6 @@ _evidence_pool: list = []
 _topic_analysis = None
 _message_pool = MessagePool()
 _deliberation_config: dict = {}  # stores mode, model, api_keys from last request
-_protocol_runtime: ProtocolRuntime | None = None
 
 # ── Model → (provider, base_url) mapping ──────────────────────────────────
 
@@ -140,6 +135,53 @@ async def health():
     return {"status": "ok", "version": "1.0.0", "mode": "sop+fishbowl"}
 
 
+# ── Role Assignment Agent ─────────────────────────────────────────────────
+
+class AssignAgentsRequest(BaseModel):
+    topic: str = ""
+
+
+@app.post("/api/topic/assign_agents")
+async def assign_agents(req: AssignAgentsRequest):
+    """角色分配agent: 分析议题并动态生成利益相关方角色。
+
+    返回至少4个与议题最相关的利益群体角色配置。
+    优先使用LLM分析（如果API Key已配置），无Key时回退到关键词模板匹配。
+    """
+    if not req.topic or not req.topic.strip():
+        raise HTTPException(400, "议题不能为空")
+
+    topic = req.topic.strip()
+
+    # Try LLM-driven assignment, fall back to simulation
+    llm = None
+    try:
+        api_key = resolve_api_key("openai_compat") or resolve_api_key("openai")
+        if api_key:
+            provider = "openai_compat"
+            model = "gpt-4o-mini"
+            if resolve_api_key("openai"):
+                provider = "openai"
+            llm = create_llm_client(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                max_tokens=1024,
+                temperature=0.3,
+            )
+    except Exception:
+        pass
+
+    result = assign_agents_for_topic(topic, llm)
+
+    return {
+        "success": True,
+        "analysis": result["analysis"],
+        "agents": result["agents"],
+        "facilitators": FACILITATOR_AGENTS,
+    }
+
+
 # ── Session management ────────────────────────────────────────────────────
 
 class DeliberationRequest(BaseModel):
@@ -157,7 +199,7 @@ class DeliberationRequest(BaseModel):
 @app.post("/api/deliberation/start")
 async def start_deliberation(req: DeliberationRequest):
     """Initialize a new SOP deliberation session."""
-    global _current_state, _topic_analysis, _message_pool, _deliberation_config, _protocol_runtime
+    global _current_state, _topic_analysis, _message_pool, _deliberation_config
 
     # Save deliberation config for stream use
     _deliberation_config = {
@@ -166,8 +208,6 @@ async def start_deliberation(req: DeliberationRequest):
         "expert_models": req.expert_models,
         "api_keys": req.api_keys,
         "expert_api_keys": req.expert_api_keys,
-        "max_rounds": max(1, min(req.max_rounds, 4)),
-        "max_speakers": max(2, min(req.max_speakers, 6)),
     }
 
     _topic_analysis = analyze_topic(req.topic)
@@ -209,18 +249,6 @@ async def start_deliberation(req: DeliberationRequest):
         agents=agents,
     )
 
-    # Open one explicit matter for deliberation. The runtime, rather than an
-    # LLM, owns subsequent procedural transitions and the audit trail.
-    _protocol_runtime = ProtocolRuntime()
-    stakeholders = [a for a in agents if a.archetype not in ("主持人", "评审员")]
-    motion = None
-    if stakeholders:
-        motion = _protocol_runtime.open_main_motion(
-            f"围绕以下问题形成条件化治理建议：{req.question}", stakeholders[0]
-        )
-        if len(stakeholders) > 1:
-            _protocol_runtime.second_current_motion(stakeholders[1])
-
     return {
         "topic": req.topic,
         "question": req.question,
@@ -246,14 +274,8 @@ async def start_deliberation(req: DeliberationRequest):
             }
             for a in agents
         ],
-        "max_rounds": _deliberation_config["max_rounds"],
-        "max_speakers": _deliberation_config["max_speakers"],
+        "max_rounds": req.max_rounds,
         "deliberation_mode": req.deliberation_mode,
-        "protocol": {
-            "current_motion": motion.content if motion else "",
-            "status": _protocol_runtime.current_motion.status.value if _protocol_runtime.current_motion else "idle",
-            "notice": "模拟程序记录，不构成真实公共授权",
-        },
     }
 
 
@@ -417,8 +439,6 @@ STRUCTURED_OUTPUT_INSTRUCTION = """
   "stance": <一个介于 -1.0 (强烈反对) 到 1.0 (强烈支持) 之间的数值>,
   "reply_to": "你要回应的角色名称（如果是在回应某人），否则为 null,
   "evidence_ids": ["你引用的证据编号列表"],
-  "procedural_action": "speak | propose_amendment | second_motion | request_information",
-  "motion_content": "如提出修正案，请写清对当前议案增加、删除或替换的内容；否则为空字符串",
   "content": "你的发言内容（200-400字）"
 }
 
@@ -460,8 +480,6 @@ def _parse_llm_response(raw: str, agent) -> dict:
             "stance": float(parsed.get("stance", agent.stance_score)),
             "reply_to": parsed.get("reply_to"),
             "evidence_ids": parsed.get("evidence_ids", []),
-            "procedural_action": parsed.get("procedural_action", "speak"),
-            "motion_content": parsed.get("motion_content", ""),
         }
     except (json.JSONDecodeError, ValueError):
         return {
@@ -469,8 +487,6 @@ def _parse_llm_response(raw: str, agent) -> dict:
             "stance": agent.stance_score,
             "reply_to": None,
             "evidence_ids": [],
-            "procedural_action": "speak",
-            "motion_content": "",
         }
 
 
@@ -498,7 +514,6 @@ async def _run_fishbowl_llm(
     agent_llms: dict,  # agent_id -> LLMClient
     max_rounds: int = 2,
     max_speakers: int = 4,
-    protocol_runtime: ProtocolRuntime | None = None,
 ):
     """Run fishbowl discussion with real LLM calls, yielding SSE events."""
     stakeholders = [a for a in agents if a.archetype not in ("主持人", "评审员")]
@@ -508,11 +523,26 @@ async def _run_fishbowl_llm(
     speak_counts = {a.agent_id: 0 for a in agents}
 
     for round_no in range(1, max_rounds + 1):
-        # Use quota- and participation-aware selection rather than unstable
-        # generated IDs. This also rotates lower-participation roles in later rounds.
-        inner = select_inner_circle(stakeholders, round_no, max_speakers, speak_counts)
-        outer = get_outer_circle(stakeholders, inner)
-        inner = order_inner_circle_speakers(inner, speak_counts)
+        # Select inner/outer circle
+        if round_no == 1:
+            inner = [a for a in stakeholders if a.agent_id in ('agent_000', 'agent_001', 'agent_004', 'agent_005')]
+            outer = [a for a in stakeholders if a.agent_id in ('agent_002', 'agent_003')]
+        else:
+            inner = [a for a in stakeholders if a.agent_id in ('agent_002', 'agent_003', 'agent_000', 'agent_001')]
+            outer = [a for a in stakeholders if a.agent_id in ('agent_004', 'agent_005')]
+
+        # If inner/outer empty from ID mismatch, fall back to index-based
+        if not inner:
+            mid = len(stakeholders) // 2
+            if round_no == 1:
+                inner = stakeholders[:max_speakers]
+                outer = stakeholders[max_speakers:]
+            else:
+                inner = stakeholders[mid:mid + max_speakers]
+                outer = stakeholders[:mid] + stakeholders[mid + max_speakers:]
+
+        inner = inner[:max_speakers]
+        outer = outer[:len(stakeholders) - max_speakers]
 
         yield {"type": "fishbowl_update", "inner": [_agent_to_event_dict(a) for a in inner],
                "outer": [_agent_to_event_dict(a) for a in outer], "roundNo": round_no}
@@ -523,10 +553,7 @@ async def _run_fishbowl_llm(
         # ── Host opens round ──
         host_llm = agent_llms.get(host_agent.agent_id)
         host_model = getattr(host_llm, 'model', 'simulation') if host_llm else 'simulation'
-        host_prompt = get_agent_prompt(
-            host_agent, topic, question,
-            protocol_context=protocol_runtime.context_for_agent(host_agent) if protocol_runtime else "",
-        )
+        host_prompt = get_agent_prompt(host_agent, topic, question)
         inner_names = "、".join(a.agent_name for a in inner)
         outer_names = "、".join(a.agent_name for a in outer) if outer else "（无）"
         host_instruction = (
@@ -587,10 +614,7 @@ async def _run_fishbowl_llm(
 
             speaker_model = getattr(speaker_llm, 'model', 'simulation') if speaker_llm else 'simulation'
             evidence = retrieve_for_agent(speaker, evidence_pool, max_cards=3)
-            system_prompt = get_agent_prompt(
-                speaker, topic, question, evidence,
-                protocol_runtime.context_for_agent(speaker) if protocol_runtime else "",
-            )
+            system_prompt = get_agent_prompt(speaker, topic, question, evidence)
             conv_context = _build_conversation_context(conversation_history)
             speaker_llm_success = False
 
@@ -652,36 +676,10 @@ async def _run_fishbowl_llm(
 
             yield {"type": "speech", "agent": _agent_to_event_dict(speaker),
                    "text": speech_text, "roundNo": round_no, "isFacilitator": False,
-                   "llm_model": speaker_model, "llm_success": speaker_llm_success,
-                   "stance": stance_val, "evidence_ids": parsed.get("evidence_ids", []),
-                   "procedural_action": parsed.get("procedural_action", "speak")}
+                   "llm_model": speaker_model, "llm_success": speaker_llm_success}
             speak_counts[speaker.agent_id] = speak_counts.get(speaker.agent_id, 0) + 1
             spoken_in_round.append(speaker.agent_id)
-            conversation_history.append({
-                "speaker": speaker.agent_name, "content": speech_text,
-                "evidence_ids": parsed.get("evidence_ids", []), "stance": stance_val,
-            })
-
-            # LLMs may propose a procedural action, but the protocol runtime
-            # is the sole authority on whether it is legal and what it changes.
-            if protocol_runtime:
-                action = parsed.get("procedural_action", "speak")
-                before_events = len(protocol_runtime.events)
-                if action == "propose_amendment" and parsed.get("motion_content"):
-                    protocol_runtime.propose_amendment(parsed["motion_content"], speaker, round_no)
-                elif action == "second_motion":
-                    protocol_runtime.second_current_motion(speaker, round_no)
-                elif action == "request_information":
-                    protocol_runtime.request_information(speaker, round_no)
-                for procedural_event in protocol_runtime.events[before_events:]:
-                    yield {"type": "procedural_event", **protocol_runtime.event_dict(procedural_event)}
-
-            interaction_ok, interaction_reason = check_interaction_norms(speech_text)
-            if not interaction_ok:
-                yield {"type": "gate_result", "gate_name": "Interaction Safety Gate",
-                       "stage_id": "S6", "status": "revise", "issues": [interaction_reason],
-                       "required_action": ["请将表达重写为针对主张、证据或后果的讨论"],
-                       "agent_id": speaker.agent_id}
+            conversation_history.append({"speaker": speaker.agent_name, "content": speech_text})
 
             # Role Boundary Gate check per speech
             role_gate = gate_role_boundary(
@@ -780,13 +778,8 @@ async def _run_fishbowl_llm(
         # ── S8: Observer Snapshot ──
         utterances = []
         for h in conversation_history:
-            utterances.append({
-                "speaker": h.get("speaker", ""), "content": h.get("content", ""),
-                "evidence_ids": h.get("evidence_ids", []),
-            })
+            utterances.append({"speaker": h.get("speaker", ""), "content": h.get("content", "")})
         snapshot = compute_observer_snapshot(utterances, agents, round_no)
-        behavior = assess_group_dynamics(utterances, [a.agent_name for a in inner])
-        snapshot.anomaly_flags.extend(flag for flag in behavior.flags if flag not in snapshot.anomaly_flags)
         yield {"type": "observer_snapshot", "snapshot": {
             "snapshot_id": snapshot.snapshot_id,
             "round_id": snapshot.round_id,
@@ -796,12 +789,6 @@ async def _run_fishbowl_llm(
             "role_boundary_violations": snapshot.role_boundary_violations,
             "unanswered_questions": snapshot.unanswered_questions,
             "anomaly_flags": snapshot.anomaly_flags,
-            "behavior": {
-                "speaker_dominance": behavior.speaker_dominance,
-                "groupthink_risk": behavior.groupthink_risk,
-                "psychological_safety_risk": behavior.psychological_safety_risk,
-                "interventions": host_interventions(behavior),
-            },
         }, "roundNo": round_no}
 
         # ── Minority Retention Gate (S7) + Evidence Gate (S8) ──
@@ -951,7 +938,7 @@ SOP_PHASES = [
 
 async def _stream_sop():
     """Generator that yields SSE events for each SOP phase."""
-    global _current_state, _topic_analysis, _message_pool, _deliberation_config, _protocol_runtime
+    global _current_state, _topic_analysis, _message_pool, _deliberation_config
 
     state = _current_state
     if state is None:
@@ -970,8 +957,6 @@ async def _stream_sop():
     deliberation_mode = _deliberation_config.get("deliberation_mode", "quick")
     quick_model = _deliberation_config.get("quick_model", "claude-sonnet-4-6")
     expert_models = _deliberation_config.get("expert_models", {})
-    max_rounds = _deliberation_config.get("max_rounds", 2)
-    max_speakers = _deliberation_config.get("max_speakers", 4)
 
     try:
         # Signal API mode to frontend
@@ -1031,17 +1016,6 @@ async def _stream_sop():
 
         # ── Phase: S4 Fishbowl Round Plan ──
         yield _sse("phase", {"phase": "S4_round_plan", "label": "S4 鱼缸轮次规划"})
-        if _protocol_runtime:
-            for event in _protocol_runtime.events:
-                yield _sse("procedural_event", _protocol_runtime.event_dict(event))
-            motion = _protocol_runtime.current_motion
-            if motion:
-                yield _sse("protocol_state", {
-                    "motion_id": motion.motion_id,
-                    "motion": motion.content,
-                    "status": motion.status.value,
-                    "notice": "模拟程序记录，不构成真实公共授权",
-                })
         await asyncio.sleep(0.05)
 
         # ── Phases S5-S8: Fishbowl Discussion ──
@@ -1074,9 +1048,8 @@ async def _stream_sop():
                 question=question,
                 evidence_pool=_evidence_pool,
                 agent_llms=agent_llms,
-                max_rounds=max_rounds,
-                max_speakers=max_speakers,
-                protocol_runtime=_protocol_runtime,
+                max_rounds=2,
+                max_speakers=4,
             ):
                 yield _sse(event["type"], {k: v for k, v in event.items() if k != "type"})
                 await asyncio.sleep(0.05)
@@ -1102,8 +1075,6 @@ async def _stream_sop():
                         "text": event.get("text", ""),
                         "round_no": event.get("roundNo", 1),
                         "isFacilitator": event.get("isFacilitator", False),
-                        "evidence_ids": event.get("evidence_ids", []),
-                        "stance": event.get("stance"),
                     })
                     speak_counts[agent_id] = speak_counts.get(agent_id, 0) + 1
                     if not event.get("isFacilitator"):
@@ -1112,54 +1083,20 @@ async def _stream_sop():
                             all_cards.append(PositionCard(
                                 agent_id=agent.agent_id,
                                 stakeholder_group=agent.archetype,
-                                stance=(
-                                    Stance.SUPPORT if event.get("stance", 0) > 0.3 else
-                                    Stance.CONDITIONAL_SUPPORT if event.get("stance", 0) > 0.0 else
-                                    Stance.OPPOSE if event.get("stance", 0) < -0.3 else
-                                    Stance.CONDITIONAL_OPPOSE if event.get("stance", 0) < 0.0 else
-                                    Stance.NEUTRAL
-                                ),
+                                stance=Stance.NEUTRAL,
                                 claims=[event.get("text", "")[:100]],
-                                evidence_ids=event.get("evidence_ids", []),
                                 round_no=event.get("roundNo", 1),
                             ))
         else:
             # Fallback to simulation
             all_cards, round_summaries, fishbowl_events = run_all_fishbowl_rounds(
                 agents=agents,
-                max_rounds=max_rounds,
-                max_speakers=max_speakers,
+                max_rounds=2,
+                max_speakers=4,
             )
-            # Keep downstream reporting schema identical to the LLM path.
-            all_dialogue = [
-                {
-                    "agent_id": card.agent_id,
-                    "text": "；".join(card.claims),
-                    "round_no": card.round_no,
-                    "isFacilitator": False,
-                }
-                for card in all_cards
-            ]
-            speak_counts = {}
-            for card in all_cards:
-                speak_counts[card.agent_id] = speak_counts.get(card.agent_id, 0) + 1
             for event in fishbowl_events:
                 yield _sse(event["type"], {k: v for k, v in event.items() if k != "type"})
                 await asyncio.sleep(0.05)
-
-            # Simulation also emits an observer assessment so the safeguards
-            # have the same visibility in both runtime modes.
-            sim_utterances = [
-                {"speaker": c.stakeholder_group, "content": "；".join(c.claims), "evidence_ids": c.evidence_ids}
-                for c in all_cards
-            ]
-            behavior = assess_group_dynamics(sim_utterances)
-            yield _sse("behavior_assessment", {
-                "flags": behavior.flags,
-                "interventions": host_interventions(behavior),
-                "speaker_dominance": behavior.speaker_dominance,
-                "groupthink_risk": behavior.groupthink_risk,
-            })
 
         # ── Phase: S9 Conflict Review ──
         yield _sse("phase", {"phase": "S9_draft_proposal", "label": "S9 生成工作草案"})
@@ -1296,46 +1233,6 @@ async def _stream_sop():
 
         # ── Phase: S11 Validation ──
         yield _sse("phase", {"phase": "S11_vote", "label": "S11 校验与投票"})
-
-        if _protocol_runtime:
-            procedural_gate = gate_procedural_readiness(
-                _protocol_runtime, round_summaries[-1] if round_summaries else None,
-            )
-            yield _sse("gate_result", {
-                "gate_name": procedural_gate.gate_name,
-                "stage_id": procedural_gate.stage_id,
-                "status": procedural_gate.status,
-                "issues": procedural_gate.issues,
-                "required_action": procedural_gate.required_action,
-            })
-            # A vote is only a simulated preference distribution. It is gated
-            # behind minority and evidence readiness and is never presented as
-            # public consent or a legally binding decision.
-            if procedural_gate.status == "pass" and host_agent:
-                summary = round_summaries[-1] if round_summaries else None
-                start = len(_protocol_runtime.events)
-                _protocol_runtime.close_debate(
-                    host_agent,
-                    minority_retained=bool(summary and summary.minority_views),
-                    evidence_ready=not bool(summary and summary.evidence_gaps),
-                    round_id=len(round_summaries),
-                )
-                if _protocol_runtime.current_motion and _protocol_runtime.current_motion.status == "voting":
-                    latest_cards = {card.agent_id: card for card in all_cards}
-                    for agent in agents:
-                        if agent.archetype in ("主持人", "评审员"):
-                            continue
-                        card = latest_cards.get(agent.agent_id)
-                        stance = card.stance if card else Stance.NEUTRAL
-                        vote = (
-                            "support" if stance in (Stance.SUPPORT, Stance.CONDITIONAL_SUPPORT) else
-                            "oppose" if stance in (Stance.OPPOSE, Stance.CONDITIONAL_OPPOSE) else
-                            "abstain"
-                        )
-                        _protocol_runtime.record_vote(agent, vote, len(round_summaries))
-                    _protocol_runtime.finalise_vote(agents, host_agent, len(round_summaries))
-                for procedural_event in _protocol_runtime.events[start:]:
-                    yield _sse("procedural_event", _protocol_runtime.event_dict(procedural_event))
 
         result = validate_all(
             proposal=proposal,
@@ -1536,18 +1433,12 @@ async def _stream_sop():
             },
             "validation": {
                 "passed": result.passed,
-                "score": getattr(result, "score", None),
-                "issues": getattr(result, "issues", []) or (
-                    result.hard_constraint_errors + result.evidence_errors + result.fairness_risks +
-                    result.conflict_errors + result.feasibility_errors + result.consistency_errors
-                ),
+                "score": result.score,
+                "issues": result.issues,
                 "action_items": getattr(result, 'required_revisions', []) or [],
             },
             "executive_summary": executive_summary,
             "recommendations": recommendations,
-            "procedural_ledger": [
-                _protocol_runtime.event_dict(event) for event in (_protocol_runtime.events if _protocol_runtime else [])
-            ],
             "summary_text": {
                 "majority_views": round_summaries[-1].majority_views[:5] if round_summaries else [],
                 "minority_views": round_summaries[-1].minority_views[:5] if round_summaries else [],
@@ -1584,23 +1475,15 @@ async def stream_sop():
 
 @app.get("/api/deliberation/state")
 async def get_state():
-    global _current_state, _protocol_runtime
+    global _current_state
     if _current_state is None:
         raise HTTPException(404, "No active session.")
-    protocol = _protocol_runtime.current_motion if _protocol_runtime else None
     return {
         "topic": _current_state.topic,
         "agents": [
             {"id": a.agent_id, "name": a.agent_name, "archetype": a.archetype}
             for a in _current_state.agents
         ],
-        "protocol": {
-            "motion_id": protocol.motion_id if protocol else "",
-            "motion": protocol.content if protocol else "",
-            "status": protocol.status.value if protocol else "idle",
-            "events": [_protocol_runtime.event_dict(e) for e in (_protocol_runtime.events if _protocol_runtime else [])],
-            "notice": "模拟程序记录，不构成真实公共授权",
-        },
     }
 
 
