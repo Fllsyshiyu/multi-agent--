@@ -18,7 +18,7 @@ st.set_page_config(
 
 st.markdown(
     '<div style="text-align:center;padding:5px;background:#10b981;color:#000;font-size:12px;font-weight:700">'
-    '✅ v7 · ' + datetime.now().strftime('%Y-%m-%d %H:%M') + ' · 本地引擎 · 角色分配可用'
+    '✅ v8 · ' + datetime.now().strftime('%Y-%m-%d %H:%M') + ' · 本地引擎 · 角色分配可用'
     '</div>',
     unsafe_allow_html=True,
 )
@@ -37,9 +37,11 @@ html_content = html_content.replace(
     '.topic-input-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:nowrap}'
 )
 # 角色分配完成提示：浅绿色小字
+before_len = len(html_content)
 html_content = html_content.replace(
     '.assign-status.error{color:var(--err)}',
     '.assign-status.error{color:var(--err)}.assign-status.done{color:#6ee7b7;font-size:9px}'
 )
 
+print(f'[CSS-INJECT] Before={before_len} After={len(html_content)} Done={len(html_content) > before_len}', flush=True)
 st.components.v1.html(html_content, height=2000, scrolling=True)
