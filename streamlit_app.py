@@ -128,4 +128,9 @@ html_content = html_content.replace(
 html_content = html_content.replace('</head>',
     '<script>(function(){var _f=window.fetch;window.fetch=function(u,o){return _f(u,o).then(function(r){if(typeof u==="string"&&u.indexOf("/api/")>=0){var ct=r.headers.get("content-type")||"";if(!ct.includes("application/json")){var e=new Error("API HTML");e.isApiHtml=!0;throw e}}return r})}})()</script></head>')
 
+
+# ── 注入：Cloud 上强制嵌入式引擎（跳过 API 调用） ──
+html_content = html_content.replace('</body>',
+    '<script>window.STREAMLIT_CLOUD=!0;if(typeof hasApiKeys==="function"){var _o=hasApiKeys;hasApiKeys=function(){return!1}}</script></body>')
+
 st.components.v1.html(html_content, height=2000, scrolling=True)
