@@ -29,4 +29,17 @@ if not HTML_PATH.exists():
     st.stop()
 
 html_content = HTML_PATH.read_text(encoding="utf-8")
+
+# ── 动态注入 CSS 修复 ──
+# ✓按钮固定在输入栏右侧
+html_content = html_content.replace(
+    '.topic-input-row{display:flex;align-items:center;gap:6px;margin-bottom:8px}',
+    '.topic-input-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:nowrap}'
+)
+# 角色分配完成提示：浅绿色小字
+html_content = html_content.replace(
+    '.assign-status.error{color:var(--err)}',
+    '.assign-status.error{color:var(--err)}.assign-status.done{color:#6ee7b7;font-size:9px}'
+)
+
 st.components.v1.html(html_content, height=2000, scrolling=True)
