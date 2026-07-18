@@ -1245,7 +1245,11 @@ async function assignRolesForTopic() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ topic }),
     });
-    if (!resp.ok) throw new Error('API error: ' + resp.status);
+    const ct = resp.headers.get('content-type') || '';
+    if (!resp.ok || !ct.includes('application/json')) {
+      // API returned non-JSON (probably HTML error page on Streamlit Cloud)
+      throw new Error('API returned non-JSON response');
+    }
 
     const data = await resp.json();
     if (!data.success || !data.agents || data.agents.length < 4) {
@@ -1299,8 +1303,8 @@ async function assignRolesForTopic() {
     }
 
   } catch (e) {
-    console.warn('API-based role assignment failed, using local fallback:', e.message);
-    // Local fallback for Streamlit Cloud / no-backend scenarios
+    console.warn('API unavailable, using local agent generation:', e.message);
+    // Silent fallback for Streamlit Cloud / no-backend scenarios
     try {
       const info = analyzeTopic(topic);
       const localAgents = generateAgentsLocal(info);
@@ -1338,7 +1342,8 @@ async function assignRolesForTopic() {
     btn.classList.remove('loading');
     btn.textContent = '✗';
     btn.style.color = 'var(--err)';
-    status.textContent = '角色分配失败：' + e.message;
+    // Silent fallback - no need to show error to user
+    // status.textContent = '';
     status.className = 'assign-status error';
     document.getElementById('btnEnter').disabled = true;
     setTimeout(() => {
