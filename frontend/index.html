@@ -479,7 +479,9 @@ if (location.protocol === 'file:') {
   <div class="ocard">
     <h2>? 多智能体<span>议事厅</span></h2>
     <p class="sub">SOP 驱动 · 鱼缸讨论 · 结构化工件<br>面向社区公共空间治理</p>
-    <input type="text" id="topicInput" value="小区门口夜市是否应该保留？" placeholder="输入议题...">
+    <div class="topic-input-row"><input type="text" id="topicInput" value="小区门口夜市是否应该保留？" placeholder="输入议题..."><button class="btn-check" id="btnCheckTopic" title="角色分配agent：分析议题并分配角色" onclick="assignRolesForTopic()">✓</button></div>
+    <div class="assign-status" id="assignStatus"></div>
+    <div class="assign-analysis" id="assignAnalysis" style="display:none"></div>
     <div class="presets">
       <button class="preset" data-topic="小区门口夜市是否应该保留？">? 夜市治理</button>
       <button class="preset" data-topic="老旧小区广场舞是否应该继续？">? 广场舞争议</button>
@@ -590,7 +592,7 @@ if (location.protocol === 'file:') {
       </div>
     </div>
 
-    <button class="btn pri" id="btnEnter" style="width:100%;justify-content:center;padding:12px;font-size:14px">
+    <button class="btn pri" id="btnEnter" style="width:100%;justify-content:center;padding:12px;font-size:14px" disabled>
       ? 进入议事厅
     </button>
     <p style="font-size:9px;color:var(--muted);margin-top:10px" id="modeHint">
@@ -712,7 +714,7 @@ const ARCHETYPE_CONFIGS = {
 // ============================================================
 // AGENTS & SOP
 // ============================================================
-const AGENTS = [
+let AGENTS = [
   { id:'a0', name:'夜市摊贩代表', role:'直接受益者', emoji:'🍜', color:'#f59e0b', bg:'#fef3c7', stance:0.8, isFacilitator:false, archetypeKey:'直接受益者',
     interests:['保留经营机会','获得稳定摊位','避免一刀切取缔','参与规则制定'] },
   { id:'a1', name:'周边居民代表', role:'直接受影响者', emoji:'🏠', color:'#ef4444', bg:'#fee2e2', stance:-0.7, isFacilitator:false, archetypeKey:'直接受影响者',
@@ -1037,7 +1039,7 @@ function validateProposal() {
 async function* runDeliberation(topic) {
   const topicAnalysis = analyzeTopic(topic);
   const speakCounts = {};
-  AGENTS.forEach(a => { speakCounts[a.id] = 0; });
+  AGENTS.filter(a => !a.isFacilitator).forEach(a => { speakCounts[a.id] = 0; });
 
   const allDialogue = [];
   const roundSummaries = [];
@@ -1171,9 +1173,115 @@ function updateSopPhase(phaseId) {
 // ============================================================
 // UI: INIT
 // ============================================================
+
+// ============================================================
+// ROLE ASSIGNMENT AGENT
+// ============================================================
+let rolesAssigned = false;
+let assignedAgentsData = null;
+
+async function assignRolesForTopic() {
+  const topic = document.getElementById('topicInput').value.trim();
+  if (!topic) return;
+
+  const btn = document.getElementById('btnCheckTopic');
+  const status = document.getElementById('assignStatus');
+  const analysis = document.getElementById('assignAnalysis');
+
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.textContent = '⟳';
+  status.textContent = '角色分配agent正在进行角色分配...';
+  status.className = 'assign-status loading';
+  analysis.style.display = 'none';
+  document.getElementById('btnEnter').disabled = true;
+
+  try {
+    const resp = await fetch('/api/topic/assign_agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic }),
+    });
+    if (!resp.ok) throw new Error('API error: ' + resp.status);
+
+    const data = await resp.json();
+    if (!data.success || !data.agents || data.agents.length < 4) {
+      throw new Error('角色分配agent未能生成足够的角色');
+    }
+
+    assignedAgentsData = data;
+
+    // Update AGENTS array with new agents + facilitators
+    AGENTS.length = 0;
+    data.agents.forEach((a, i) => {
+      AGENTS.push({
+        id: a.id || 'a' + i,
+        name: a.name,
+        role: a.role,
+        emoji: a.emoji || '👤',
+        color: a.color || '#8899b4',
+        bg: a.bg || '',
+        stance: a.stance || 0.0,
+        isFacilitator: false,
+        archetypeKey: a.archetypeKey || a.role || '',
+        interests: a.interests || []
+      });
+    });
+    if (data.facilitators) {
+      data.facilitators.forEach(f => AGENTS.push({...f}));
+    } else {
+      AGENTS.push(
+        {id:'mod',name:'议事主持人',role:'流程引导',emoji:'🎤',color:'#fbbf24',bg:'#fef3c7',stance:0.0,isFacilitator:true,archetypeKey:null,interests:['确保各方发言权平等','引导讨论聚焦方案设计而非立场对抗','cue流程阶段控制发言节奏','观察发言分布调整发言机会']},
+        {id:'rev',name:'议事评审员',role:'质量诊断',emoji:'🔍',color:'#34d399',bg:'#d1fae5',stance:0.0,isFacilitator:true,archetypeKey:null,interests:['评审议事过程是否公平论证是否充分','指出逻辑漏洞证据缺失和讨论盲区','评估各利益群体的讨论质量和参与度','为议事质量改进提供具体建议']}
+      );
+    }
+
+    rolesAssigned = true;
+    btn.classList.remove('loading');
+    btn.classList.add('done');
+    btn.textContent = '✓';
+    status.textContent = '角色分配agent已完成角色分配';
+    status.className = 'assign-status done';
+
+    if (data.analysis) {
+      analysis.textContent = '📋 ' + data.analysis;
+      analysis.style.display = 'block';
+    }
+
+    document.getElementById('btnEnter').disabled = false;
+
+    // Rebuild expert mode list if visible
+    if (currentMode === 'expert') {
+      buildExpertAgentList();
+    }
+
+  } catch (e) {
+    console.error('Role assignment failed:', e);
+    btn.classList.remove('loading');
+    btn.textContent = '✗';
+    btn.style.color = 'var(--err)';
+    status.textContent = '角色分配失败：' + e.message;
+    status.className = 'assign-status error';
+    document.getElementById('btnEnter').disabled = true;
+    setTimeout(() => {
+      btn.textContent = '✓';
+      btn.style.color = '';
+      btn.disabled = false;
+      status.textContent = '';
+      status.className = 'assign-status';
+    }, 3000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function initApp() {
   const topic = document.getElementById('topicInput').value.trim();
   if (!topic) return;
+  if (!rolesAssigned) {
+    alert('请先点击议题输入框右侧的 ✓ 按钮，让角色分配agent为您分析议题并分配角色。');
+    return;
+  }
 
   document.getElementById('startOverlay').classList.add('hidden');
   document.getElementById('topicDisplay').textContent = topic;
@@ -2460,6 +2568,10 @@ async function startAPIDeliberation() {
 // EVENT BINDINGS
 // ============================================================
 document.getElementById('btnEnter').addEventListener('click', initApp);
+// Auto-assign roles for the default topic on page load
+window.addEventListener('load', () => {
+  setTimeout(() => assignRolesForTopic(), 500);
+});
 document.getElementById('btnStart').addEventListener('click', startDeliberation);
 document.getElementById('btnReport').addEventListener('click', showReport);
 document.getElementById('reportModal').addEventListener('click', e => {

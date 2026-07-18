@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ma_deliberation_demo.topic import analyze_topic, compute_complexity
+from ma_deliberation_demo.role_assigner import assign_agents_for_topic, FACILITATOR_AGENTS
 from ma_deliberation_demo.agents import load_archetypes, generate_agents, get_agent_prompt, load_deliberation_sop
 from ma_deliberation_demo.evidence import load_evidence, retrieve_for_agent, format_evidence_context
 from ma_deliberation_demo.schemas import DeliberationState, Utterance
@@ -132,6 +133,53 @@ async def root():
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": "1.0.0", "mode": "sop+fishbowl"}
+
+
+# ── Role Assignment Agent ─────────────────────────────────────────────────
+
+class AssignAgentsRequest(BaseModel):
+    topic: str = ""
+
+
+@app.post("/api/topic/assign_agents")
+async def assign_agents(req: AssignAgentsRequest):
+    """角色分配agent: 分析议题并动态生成利益相关方角色。
+
+    返回至少4个与议题最相关的利益群体角色配置。
+    优先使用LLM分析（如果API Key已配置），无Key时回退到关键词模板匹配。
+    """
+    if not req.topic or not req.topic.strip():
+        raise HTTPException(400, "议题不能为空")
+
+    topic = req.topic.strip()
+
+    # Try LLM-driven assignment, fall back to simulation
+    llm = None
+    try:
+        api_key = resolve_api_key("openai_compat") or resolve_api_key("openai")
+        if api_key:
+            provider = "openai_compat"
+            model = "gpt-4o-mini"
+            if resolve_api_key("openai"):
+                provider = "openai"
+            llm = create_llm_client(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                max_tokens=1024,
+                temperature=0.3,
+            )
+    except Exception:
+        pass
+
+    result = assign_agents_for_topic(topic, llm)
+
+    return {
+        "success": True,
+        "analysis": result["analysis"],
+        "agents": result["agents"],
+        "facilitators": FACILITATOR_AGENTS,
+    }
 
 
 # ── Session management ────────────────────────────────────────────────────
