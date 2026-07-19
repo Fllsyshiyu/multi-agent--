@@ -414,6 +414,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
   <a href="http://localhost:8765" style="color:#38bdf8;font-size:20px;font-weight:700;text-decoration:none;padding:12px 32px;border:2px solid #38bdf8;border-radius:8px;">http://localhost:8765</a>
 </div>
 <script>
+  const API_BASE = "https://multi-agent-api-2heu.onrender.com";
+
+function apiUrl(path) {
+  return API_BASE.replace(/\/$/, "") + path;
+}
 if (location.protocol === 'file:') {
   document.getElementById('fileWarning').style.display = 'flex';
 }
@@ -1244,7 +1249,7 @@ async function assignRolesForTopic() {
   document.getElementById('btnEnter').disabled = true;
 
   try {
-    const resp = await fetch('/api/topic/assign_agents', {
+    const resp = await fetch(apiUrl('/api/topic/assign_agents'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ topic }),
@@ -1794,7 +1799,7 @@ async function startDeliberation() {
 
     let validation = null;
     try {
-      const vResp = await fetch('/api/deliberation/validate_keys', {
+      const vResp = await fetch(apiUrl('/api/deliberation/validate_keys'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2642,7 +2647,7 @@ async function startAPIDeliberation() {
     // Step 1: Initialize deliberation session
     const apiKeys = mode === 'expert' ? {} : getApiKeys();
     const expertApiKeys = mode === 'expert' ? getExpertApiKeysForRequest() : {};
-    const initResp = await fetch('/api/deliberation/start', {
+    const initResp = await fetch(apiUrl('/api/deliberation/start'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2666,7 +2671,7 @@ async function startAPIDeliberation() {
     if (sb) { sb.textContent = '🔵 真实API ' + modelInfo; sb.className = 'status-badge running'; }
 
     // Step 2: Stream deliberation via SSE
-    const response = await fetch('/api/deliberation/stream');
+    const response = await fetch(apiUrl('/api/deliberation/stream'));
     if (!response.ok) throw new Error('API stream error: ' + response.status);
 
     const reader = response.body.getReader();
