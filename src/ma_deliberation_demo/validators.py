@@ -43,6 +43,9 @@ def validate_all(
     results.append(validate_conflicts(proposal, conflict_matrix))
     results.append(validate_feasibility(proposal))
     results.append(validate_consistency(proposal, position_cards, round_summaries))
+    results.append(validate_deliberation_substance(
+        position_cards, round_summaries, conflict_matrix, evidence_ids or [],
+    ))
 
     # Aggregate
     all_errors = []
@@ -294,6 +297,70 @@ def validate_consistency(
         for uc in summary.unresolved_conflicts[:2]:
             if uc[:15] in proposal.content and "已解决" in proposal.content:
                 errors.append(f"一致性矛盾：方案声称已解决'{uc[:30]}...'，但摘要中标记为未解决")
+
+    return ValidationResult(consistency_errors=errors)
+
+
+# ── Validator 7: Deliberation Substance ───────────────────────────────────
+
+def validate_deliberation_substance(
+    position_cards: list[PositionCard],
+    round_summaries: list[RoundSummary],
+    conflict_matrix: ConflictMatrix | None = None,
+    evidence_ids: list[str] | None = None,
+) -> ValidationResult:
+    """Reject ceremonial role declarations that were mistaken for debate.
+
+    This is intentionally structural rather than an LLM-as-judge: it checks
+    whether there are concrete stakeholder claims, grounded references, and a
+    recorded disagreement before a proposal may be called deliberated.
+    """
+    errors: list[str] = []
+    stakeholder_cards = [card for card in position_cards if card.stakeholder_group]
+    if len(stakeholder_cards) < 2:
+        errors.append("讨论实质性不足：至少需要两名利益相关方提出立场主张")
+        return ValidationResult(consistency_errors=errors)
+
+    ceremonial_markers = (
+        "根据角色利益与证据形成条件性立场",
+        "中立主持，不做价值判断",
+        "独立评审，不替代任何一方",
+    )
+    substantive_cards = []
+    for card in stakeholder_cards:
+        claims = [claim.strip() for claim in card.claims if claim and claim.strip()]
+        text = " ".join(claims)
+        if len(text) < 35 or any(marker in text for marker in ceremonial_markers):
+            errors.append(f"讨论实质性不足：{card.stakeholder_group}未提出可讨论的具体主张")
+        else:
+            substantive_cards.append(card)
+
+    if len(substantive_cards) < 2:
+        errors.append("讨论实质性不足：有效主张数量不足，不能形成方案或进入投票")
+
+    available_evidence = set(evidence_ids or [])
+    cited_evidence = {
+        evidence_id
+        for card in substantive_cards
+        for evidence_id in card.evidence_ids
+        if evidence_id
+    }
+    if available_evidence and not cited_evidence:
+        errors.append("讨论实质性不足：讨论未引用任何可用证据")
+    elif available_evidence and not cited_evidence.intersection(available_evidence):
+        errors.append("讨论实质性不足：讨论引用的证据无法在当前证据库中核验")
+
+    stances = {card.stance for card in substantive_cards}
+    has_divergence = (
+        any(stance in (Stance.SUPPORT, Stance.CONDITIONAL_SUPPORT) for stance in stances)
+        and any(stance in (Stance.OPPOSE, Stance.CONDITIONAL_OPPOSE) for stance in stances)
+    )
+    recorded_conflict = bool(conflict_matrix and conflict_matrix.axes)
+    if len(substantive_cards) >= 2 and not has_divergence and not recorded_conflict:
+        errors.append("讨论实质性不足：未记录任何立场分歧或冲突轴，不能宣称形成共识")
+
+    if not round_summaries:
+        errors.append("讨论实质性不足：缺少轮次摘要，无法追溯讨论过程")
 
     return ValidationResult(consistency_errors=errors)
 

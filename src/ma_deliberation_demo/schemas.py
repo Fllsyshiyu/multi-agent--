@@ -47,6 +47,7 @@ class EvidenceSourceType(str, Enum):
     NEWS = "news"
     ACADEMIC = "academic"
     COURT_CASE = "court_case"
+    EXTERNAL_CASE = "external_case"
 
 
 @dataclass
@@ -73,7 +74,9 @@ class AgentCard:
     agent_name: str
     archetype: str
     relationship_to_topic: str
+    role_kind: str = ""
     main_interests: list[str] = field(default_factory=list)
+    evidence_focus: list[str] = field(default_factory=list)
     possible_stance: str = ""
     stance_score: float = 0.0
     can_say: list[str] = field(default_factory=list)

@@ -1,0 +1,25 @@
+# Shared RAG configuration. Source JSONL remains the human-maintained source
+# of truth; every file in index_dir is generated and may be rebuilt.
+source_paths:
+  - data/knowledge/external_cases.jsonl
+index_dir: data/knowledge/index
+
+embedding:
+  # A compact local Chinese model is appropriate while the corpus is small.
+  # Switching this value requires rebuilding the whole index.
+  model_name: BAAI/bge-small-zh-v1.5
+  query_prefix: "为这个句子生成表示以用于检索相关文章："
+  device: cpu
+  batch_size: 16
+
+chunking:
+  max_chars: 1200
+
+retrieval:
+  lexical_candidates: 20
+  vector_candidates: 20
+  final_chunks_per_agent: 4
+  max_chunks_per_case: 1
+  reciprocal_rank_k: 60
+  allow_knowledge_types:
+    - external_case

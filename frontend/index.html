@@ -714,7 +714,9 @@ const ARCHETYPE_CONFIGS = {
 // ============================================================
 // AGENTS & SOP
 // ============================================================
-let AGENTS = [
+// Retained only as legacy demo data. Runtime deliberations always receive
+// their Agents from the backend Role Plan.
+const LEGACY_DEMO_AGENTS = [
   { id:'a0', name:'夜市摊贩代表', role:'直接受益者', emoji:'🍜', color:'#f59e0b', bg:'#fef3c7', stance:0.8, isFacilitator:false, archetypeKey:'直接受益者',
     interests:['保留经营机会','获得稳定摊位','避免一刀切取缔','参与规则制定'] },
   { id:'a1', name:'周边居民代表', role:'直接受影响者', emoji:'🏠', color:'#ef4444', bg:'#fee2e2', stance:-0.7, isFacilitator:false, archetypeKey:'直接受影响者',
@@ -732,6 +734,8 @@ let AGENTS = [
   { id:'rev', name:'议事评审员', role:'质量诊断', emoji:'🔍', color:'#34d399', bg:'#d1fae5', stance:0.0, isFacilitator:true, archetypeKey:null,
     interests:['评审议事过程是否公平论证是否充分','指出逻辑漏洞证据缺失和讨论盲区','评估各利益群体的讨论质量和参与度','为议事质量改进提供具体建议'] },
 ];
+
+let AGENTS = [];
 
 const SOP_PHASES = [
   {id:'S0_topic_input', label:'S0 议题输入'},
@@ -1751,6 +1755,12 @@ async function startDeliberation() {
   renderSopBar();
   renderLeftPanel();
 
+  // The backend owns role planning in every mode, including simulated LLM
+  // mode. This prevents the browser's legacy night-market demo from being
+  // used for unrelated topics.
+  await startAPIDeliberation();
+  return;
+
   AGENTS.filter(a => !a.isFacilitator).forEach(a => {
     const sc = document.getElementById(`sc-${a.id}`);
     if (sc) sc.textContent = '0';
@@ -1905,8 +1915,20 @@ async function handleEngineEvent(event) {
       if (event.active) {
         document.getElementById('statusBadge').textContent = '? API ' + (event.quick_model || event.mode || '');
         document.getElementById('statusBadge').className = 'status-badge running';
+      } else {
+        document.getElementById('statusBadge').textContent = '⚠️ 规则模拟（不可作结论）';
+        document.getElementById('statusBadge').className = 'status-badge error';
       }
       break;
+
+    case 'runtime_warning': {
+      const warning = document.createElement('div');
+      warning.className = 'chat-msg facilitator';
+      warning.innerHTML = '<div class="cm-text" style="border-left:3px solid var(--warn);background:rgba(245,158,11,0.1);color:var(--warn)"></div>';
+      warning.querySelector('.cm-text').textContent = '⚠️ ' + (event.message || '运行时已降级为规则模拟');
+      addToStage(warning);
+      break;
+    }
 
     case 'phase':
     case 'sop_phase':
@@ -2567,6 +2589,41 @@ function loadModeConfig() {
 // ============================================================
 // API INTEGRATION (backend SSE)
 // ============================================================
+function applyRuntimeAgents(apiAgents) {
+  AGENTS = (apiAgents || []).map(agent => ({
+    id: agent.id,
+    name: agent.name,
+    role: agent.archetype || agent.role_kind || '利益相关方',
+    roleKind: agent.role_kind || '',
+    emoji: agent.emoji || '👤',
+    color: agent.color || '#6366f1',
+    bg: '#172554',
+    stance: Number(agent.stance || 0),
+    isFacilitator: Boolean(agent.is_facilitator),
+    archetypeKey: agent.archetype || null,
+    interests: agent.interests || [],
+    evidenceFocus: agent.evidence_focus || [],
+  }));
+  collectedData.agents = AGENTS;
+  renderLeftPanel();
+}
+
+function renderRolePlanPreview(rolePlan) {
+  if (!rolePlan) return;
+  const stage = document.getElementById('rightStage');
+  if (!stage) return;
+  const roles = rolePlan.roles || [];
+  const el = document.createElement('div');
+  el.className = 'round-summary';
+  el.style.borderLeft = '3px solid var(--accent)';
+  el.innerHTML = '<div class="rs-hd" style="color:var(--accent)">🧭 本场角色规划</div>' +
+    '<div style="font-size:10px;color:var(--dim);margin:4px 0">' + (rolePlan.rationale || []).join('；') + '</div>' +
+    roles.map(role => '<div style="font-size:10px;margin:4px 0"><strong>' + role.role_name + '</strong> · ' + role.role_kind +
+      '<div style="color:var(--dim);margin-left:8px">' + (role.main_interests || []).join('、') + '</div></div>').join('') +
+    ((rolePlan.silent_stakeholders || []).length ? '<div style="font-size:9px;color:var(--warn);margin-top:4px">待关注的沉默群体：' + rolePlan.silent_stakeholders.join('、') + '</div>' : '');
+  stage.appendChild(el);
+}
+
 async function startAPIDeliberation() {
   const topic = document.getElementById('topicDisplay').textContent;
   const mode = currentMode;
@@ -2600,6 +2657,8 @@ async function startAPIDeliberation() {
 
     if (!initResp.ok) throw new Error('API init error: ' + initResp.status);
     const initData = await initResp.json();
+    applyRuntimeAgents(initData.agents);
+    renderRolePlanPreview(initData.role_plan);
 
     // Show session info in status
     const modelInfo = mode === 'quick' ? quickModel : (Object.values(expertModels)[0] || '多模型');
@@ -2635,7 +2694,14 @@ async function startAPIDeliberation() {
     console.error('API deliberation error, falling back to embedded engine:', e);
     var sb2 = document.getElementById('statusBadge');
     if (sb2) { sb2.textContent = '⚠️ API失败，回退模拟模式'; sb2.className = 'status-badge running'; }
-    // Fallback to embedded engine
+    // Do not use the legacy static night-market simulation after an API error.
+    running = false;
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('rightStage').innerHTML +=
+      '<div class="empty-state"><div style="font-size:28px">⚠️</div><div>无法连接角色规划服务；未启动静态模拟，以避免错误角色参与议事。</div></div>';
+    return;
+
+    // Legacy fallback retained below for historical reference only.
     running = true;
     const gen = runDeliberation(topic);
     for await (const event of gen) {
